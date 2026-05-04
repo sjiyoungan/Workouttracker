@@ -1,41 +1,5 @@
-import { Dumbbell } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
+import WorkoutTracker from "@/components/workout-tracker"
 
 export default function App() {
-  return (
-    <div className="flex min-h-svh flex-col items-center justify-center p-6">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <div className="mx-auto mb-2 flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary">
-            <Dumbbell className="size-6" aria-hidden />
-          </div>
-          <CardTitle className="text-2xl">Workout Tracker</CardTitle>
-          <CardDescription>
-            Log sessions, track progress, and stay consistent. React and
-            shadcn/ui are wired up and ready for your next feature.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          <Button className="w-full">Start a workout</Button>
-          <Button variant="outline" className="w-full">
-            View history
-          </Button>
-        </CardContent>
-        <CardFooter className="justify-center border-t pt-6">
-          <p className="text-center text-xs text-muted-foreground">
-            Run <code className="rounded bg-muted px-1 py-0.5">npm run dev</code>{" "}
-            to develop locally.
-          </p>
-        </CardFooter>
-      </Card>
-    </div>
-  )
+  return <WorkoutTracker />
 }
