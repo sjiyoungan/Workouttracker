@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Check, Plus, UserRound } from "lucide-react"
+import { Plus, UserRound } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -28,6 +28,9 @@ type Draft = { reps: string; lbs: string }
 export default function WorkoutTracker() {
   const [state, setState] = useState<WorkoutAppState>(loadWorkoutState)
   const [drafts, setDrafts] = useState<Record<string, Draft>>({})
+  const draftsRef = useRef(drafts)
+  draftsRef.current = drafts
+
   const [profileOpen, setProfileOpen] = useState(false)
   const [profileDraft, setProfileDraft] = useState(state.profileName)
   const [addOpen, setAddOpen] = useState(false)
@@ -91,9 +94,9 @@ export default function WorkoutTracker() {
     setAddOpen(false)
   }, [addName, state.exercises])
 
-  const logSet = useCallback(
+  const commitDraftIfValid = useCallback(
     (exerciseId: string) => {
-      const d = drafts[exerciseId] ?? { reps: "", lbs: "" }
+      const d = draftsRef.current[exerciseId] ?? { reps: "", lbs: "" }
       const reps = Number.parseInt(d.reps, 10)
       const weightLb = Number.parseFloat(d.lbs)
       if (
@@ -139,7 +142,7 @@ export default function WorkoutTracker() {
         [exerciseId]: { reps: "", lbs: "" },
       }))
     },
-    [drafts, todayStr]
+    [todayStr]
   )
 
   const updateTodaySet = useCallback(
@@ -209,7 +212,7 @@ export default function WorkoutTracker() {
                 todayStr={todayStr}
                 draft={drafts[ex.id] ?? { reps: "", lbs: "" }}
                 onDraftChange={(field, v) => setDraft(ex.id, field, v)}
-                onLog={() => logSet(ex.id)}
+                onCommitDraft={() => commitDraftIfValid(ex.id)}
                 onUpdateTodaySet={(setIndex, reps, weightLb) =>
                   updateTodaySet(ex.id, setIndex, reps, weightLb)
                 }
@@ -302,13 +305,15 @@ export default function WorkoutTracker() {
   )
 }
 
+const SET_COL_W = "min-w-[5.75rem] w-[5.75rem] shrink-0"
+
 function ExerciseRow({
   exercise,
   state,
   todayStr,
   draft,
   onDraftChange,
-  onLog,
+  onCommitDraft,
   onUpdateTodaySet,
 }: {
   exercise: Exercise
@@ -316,77 +321,57 @@ function ExerciseRow({
   todayStr: string
   draft: Draft
   onDraftChange: (field: keyof Draft, value: string) => void
-  onLog: () => void
+  onCommitDraft: () => void
   onUpdateTodaySet: (setIndex: number, reps: number, weightLb: number) => void
 }) {
   const prior = lastSessionBeforeToday(state, exercise.id, todayStr)
   const today = todaySession(state, exercise.id, todayStr)
   const todaySets = today?.sets ?? []
 
-  const nextSetNumber = todaySets.length + 1
-
-  const repsOk = Number.parseInt(draft.reps, 10)
-  const lbsOk = Number.parseFloat(draft.lbs)
-  const canLog =
-    Number.isFinite(repsOk) &&
-    repsOk > 0 &&
-    Number.isFinite(lbsOk) &&
-    lbsOk > 0
-
   return (
     <article className="border-b py-3">
-      <h2 className="text-sm font-semibold leading-snug">{exercise.name}</h2>
-
-      <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1">
-        <div className="text-[0.65rem] font-semibold uppercase tracking-wide text-muted-foreground">
-          Last
+      <h2 className="px-1 text-sm font-semibold leading-snug">{exercise.name}</h2>
+      <div className="mt-2 -mx-1 flex overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
+        <div
+          className="sticky left-0 z-10 flex max-w-[11rem] min-w-[8.5rem] shrink-0 flex-col border-r border-border bg-background px-2 py-0.5 pr-3 shadow-[6px_0_14px_-8px_rgba(0,0,0,0.25)]"
+        >
+          <div className="text-[0.65rem] font-semibold uppercase tracking-wide text-muted-foreground">
+            Last
+          </div>
+          <p className="mt-1 text-xs leading-snug text-muted-foreground">
+            {prior ? summarizeSession(prior) : "No prior log"}
+          </p>
         </div>
-        <div className="text-right text-[0.65rem] font-semibold uppercase tracking-wide text-muted-foreground">
-          Set {nextSetNumber}
-        </div>
 
-        <div className="min-w-0 self-start text-xs leading-snug text-muted-foreground">
-          {prior ? summarizeSession(prior) : "No prior log"}
-        </div>
-
-        <div className="flex min-w-0 flex-col items-end gap-2">
+        <div className="flex min-w-min flex-nowrap items-start gap-3 pl-3 pr-1 pt-0.5">
           {todaySets.map((set, setIndex) => (
-            <LoggedSetLine
+            <div
               key={set.loggedAt}
-              exerciseId={exercise.id}
-              set={set}
-              setIndex={setIndex}
-              onSave={(reps, weightLb) => onUpdateTodaySet(setIndex, reps, weightLb)}
-            />
-          ))}
-          <div className="flex flex-nowrap items-end justify-end gap-1">
-            <Input
-              id={`draft-reps-${exercise.id}`}
-              inputMode="numeric"
-              aria-label="Reps for next set"
-              value={draft.reps}
-              onChange={(e) => onDraftChange("reps", e.target.value)}
-              className="h-9 w-[3.25rem] px-1 text-center text-sm tabular-nums"
-            />
-            <Input
-              id={`draft-lbs-${exercise.id}`}
-              inputMode="decimal"
-              aria-label="Weight in lb for next set"
-              value={draft.lbs}
-              onChange={(e) => onDraftChange("lbs", e.target.value)}
-              className="h-9 w-[3.25rem] px-1 text-center text-sm tabular-nums"
-            />
-            <Button
-              type="button"
-              size="icon"
-              variant="secondary"
-              disabled={!canLog}
-              className="size-10 shrink-0 touch-manipulation"
-              aria-label={`Log set ${nextSetNumber} for ${exercise.name}`}
-              onClick={onLog}
+              className={`flex flex-col items-center gap-1 ${SET_COL_W}`}
             >
-              <Check className="size-5" aria-hidden />
-            </Button>
+              <div className="min-h-[0.875rem] text-center text-[0.65rem] font-semibold uppercase tracking-wide text-muted-foreground">
+                Set {setIndex + 1}
+              </div>
+              <LoggedSetCell
+                exerciseId={exercise.id}
+                set={set}
+                setIndex={setIndex}
+                onSave={(reps, weightLb) =>
+                  onUpdateTodaySet(setIndex, reps, weightLb)
+                }
+              />
+            </div>
+          ))}
+          <div className={`flex flex-col items-center gap-1 ${SET_COL_W}`}>
+            <div className="min-h-[0.875rem] text-center text-[0.65rem] font-semibold uppercase tracking-wide text-muted-foreground">
+              Set {todaySets.length + 1}
+            </div>
+            <DraftSetPair
+              exerciseId={exercise.id}
+              draft={draft}
+              onDraftChange={onDraftChange}
+              onCommitDraft={onCommitDraft}
+            />
           </div>
         </div>
       </div>
@@ -394,7 +379,54 @@ function ExerciseRow({
   )
 }
 
-function LoggedSetLine({
+function DraftSetPair({
+  exerciseId,
+  draft,
+  onDraftChange,
+  onCommitDraft,
+}: {
+  exerciseId: string
+  draft: Draft
+  onDraftChange: (field: keyof Draft, value: string) => void
+  onCommitDraft: () => void
+}) {
+  const wrapRef = useRef<HTMLDivElement>(null)
+
+  const onBlurGroup = (e: React.FocusEvent<HTMLDivElement>) => {
+    const next = e.relatedTarget as Node | null
+    if (wrapRef.current?.contains(next)) return
+    onCommitDraft()
+  }
+
+  return (
+    <div
+      ref={wrapRef}
+      className="mt-1 flex w-full flex-nowrap justify-center gap-1"
+      onBlur={onBlurGroup}
+    >
+      <Input
+        id={`draft-reps-${exerciseId}`}
+        inputMode="numeric"
+        placeholder="Rep"
+        aria-label="Reps"
+        value={draft.reps}
+        onChange={(e) => onDraftChange("reps", e.target.value)}
+        className="h-9 w-[2.75rem] min-w-0 flex-1 px-1 text-center text-sm tabular-nums"
+      />
+      <Input
+        id={`draft-lbs-${exerciseId}`}
+        inputMode="decimal"
+        placeholder="lbs"
+        aria-label="Weight in lb"
+        value={draft.lbs}
+        onChange={(e) => onDraftChange("lbs", e.target.value)}
+        className="h-9 w-[2.75rem] min-w-0 flex-1 px-1 text-center text-sm tabular-nums"
+      />
+    </div>
+  )
+}
+
+function LoggedSetCell({
   exerciseId,
   set,
   setIndex,
@@ -439,7 +471,7 @@ function LoggedSetLine({
     return (
       <button
         type="button"
-        className="max-w-[12rem] touch-manipulation rounded-md px-2 py-1.5 text-right text-sm tabular-nums text-foreground hover:bg-muted/70 active:bg-muted"
+        className="mt-1 w-full touch-manipulation rounded-md px-1 py-1.5 text-center text-xs tabular-nums leading-snug text-foreground hover:bg-muted/70 active:bg-muted"
         onClick={() => setEditing(true)}
       >
         {set.reps} reps {set.weightLb}lbs
@@ -450,25 +482,27 @@ function LoggedSetLine({
   return (
     <div
       ref={wrapRef}
-      className="flex max-w-[12rem] justify-end gap-1"
+      className="mt-1 flex w-full flex-nowrap justify-center gap-1"
       onBlur={onBlurGroup}
     >
       <Input
         id={`${idBase}-reps`}
         autoFocus
         inputMode="numeric"
+        placeholder="Rep"
         aria-label={`Set ${setIndex + 1} reps`}
         value={repsStr}
         onChange={(e) => setRepsStr(e.target.value)}
-        className="h-9 w-[3.25rem] px-1 text-center text-sm tabular-nums"
+        className="h-9 w-[2.75rem] min-w-0 flex-1 px-1 text-center text-sm tabular-nums"
       />
       <Input
         id={`${idBase}-lbs`}
         inputMode="decimal"
-        aria-label={`Set ${setIndex + 1} weight in lb`}
+        placeholder="lbs"
+        aria-label={`Set ${setIndex + 1} weight`}
         value={lbsStr}
         onChange={(e) => setLbsStr(e.target.value)}
-        className="h-9 w-[3.25rem] px-1 text-center text-sm tabular-nums"
+        className="h-9 w-[2.75rem] min-w-0 flex-1 px-1 text-center text-sm tabular-nums"
       />
     </div>
   )
