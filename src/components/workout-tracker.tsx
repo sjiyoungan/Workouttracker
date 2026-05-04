@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Check, Plus, UserRound } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -13,7 +13,8 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
-import type { DaySession, Exercise, LoggedSet, WorkoutAppState } from "@/lib/workout-model"
+import { cn } from "@/lib/utils"
+import type { Exercise, LoggedSet, WorkoutAppState } from "@/lib/workout-model"
 import {
   lastSessionBeforeToday,
   loadWorkoutState,
@@ -25,6 +26,12 @@ import {
 } from "@/lib/workout-model"
 
 type Draft = { reps: string; lbs: string }
+
+const ghostInput =
+  "border-transparent bg-transparent shadow-none ring-0 outline-none " +
+  "focus-visible:border-input focus-visible:bg-background focus-visible:shadow-sm " +
+  "focus-visible:ring-1 focus-visible:ring-ring " +
+  "placeholder:text-muted-foreground/50"
 
 export default function WorkoutTracker() {
   const [state, setState] = useState<WorkoutAppState>(loadWorkoutState)
@@ -143,6 +150,30 @@ export default function WorkoutTracker() {
     [drafts, todayStr]
   )
 
+  const updateTodaySet = useCallback(
+    (exerciseId: string, setIndex: number, reps: number, weightLb: number) => {
+      setState((s) => {
+        const sessions = [...(s.sessionsByExerciseId[exerciseId] ?? [])]
+        const idx = sessions.findIndex((x) => x.date === todayStr)
+        if (idx === -1) return s
+        const session = sessions[idx]
+        const sets = session.sets.map((st, i) =>
+          i === setIndex ? { ...st, reps, weightLb } : st
+        )
+        const nextSessions = [...sessions]
+        nextSessions[idx] = { ...session, sets }
+        return {
+          ...s,
+          sessionsByExerciseId: {
+            ...s.sessionsByExerciseId,
+            [exerciseId]: nextSessions,
+          },
+        }
+      })
+    },
+    [todayStr]
+  )
+
   const setDraft = (exerciseId: string, field: keyof Draft, value: string) => {
     setDrafts((prev) => ({
       ...prev,
@@ -177,47 +208,21 @@ export default function WorkoutTracker() {
             No exercises yet. Add one below to start logging sets.
           </p>
         ) : (
-          <div className="overflow-x-auto [-webkit-overflow-scrolling:touch]">
-            <table className="w-full min-w-[min(100%,20rem)] table-fixed border-separate border-spacing-0">
-              <caption className="sr-only">
-                Exercises, last session, and today&apos;s sets
-              </caption>
-              <thead>
-                <tr className="border-b text-[0.65rem] font-semibold uppercase tracking-wide text-muted-foreground">
-                  <th
-                    scope="col"
-                    className="w-[26%] pb-2 pl-1 text-left font-semibold sm:text-xs"
-                  >
-                    Exercise
-                  </th>
-                  <th
-                    scope="col"
-                    className="w-[34%] pb-2 text-left font-semibold sm:text-xs"
-                  >
-                    Last
-                  </th>
-                  <th
-                    scope="col"
-                    className="w-[40%] pb-2 pr-1 text-right font-semibold sm:text-xs"
-                  >
-                    Today
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {state.exercises.map((ex) => (
-                  <ExerciseRow
-                    key={ex.id}
-                    exercise={ex}
-                    state={state}
-                    todayStr={todayStr}
-                    draft={drafts[ex.id] ?? { reps: "", lbs: "" }}
-                    onDraftChange={(field, v) => setDraft(ex.id, field, v)}
-                    onLog={() => logSet(ex.id)}
-                  />
-                ))}
-              </tbody>
-            </table>
+          <div className="flex flex-col">
+            {state.exercises.map((ex) => (
+              <ExerciseRow
+                key={ex.id}
+                exercise={ex}
+                state={state}
+                todayStr={todayStr}
+                draft={drafts[ex.id] ?? { reps: "", lbs: "" }}
+                onDraftChange={(field, v) => setDraft(ex.id, field, v)}
+                onLog={() => logSet(ex.id)}
+                onUpdateTodaySet={(setIndex, reps, weightLb) =>
+                  updateTodaySet(ex.id, setIndex, reps, weightLb)
+                }
+              />
+            ))}
           </div>
         )}
 
@@ -312,6 +317,7 @@ function ExerciseRow({
   draft,
   onDraftChange,
   onLog,
+  onUpdateTodaySet,
 }: {
   exercise: Exercise
   state: WorkoutAppState
@@ -319,6 +325,7 @@ function ExerciseRow({
   draft: Draft
   onDraftChange: (field: keyof Draft, value: string) => void
   onLog: () => void
+  onUpdateTodaySet: (setIndex: number, reps: number, weightLb: number) => void
 }) {
   const prior = lastSessionBeforeToday(state, exercise.id, todayStr)
   const today = todaySession(state, exercise.id, todayStr)
@@ -333,90 +340,158 @@ function ExerciseRow({
     lbsOk > 0
 
   return (
-    <tr className="border-b align-top">
-      <td className="py-3 pl-1">
-        <p className="line-clamp-4 text-sm font-semibold leading-snug">
-          {exercise.name}
-        </p>
-      </td>
-      <td className="py-3 pr-1">
-        <LastWorkoutCell prior={prior} />
-      </td>
-      <td className="py-3 pl-1">
-        <div className="flex max-w-full flex-row flex-nowrap items-end justify-end gap-1.5 overflow-x-auto pb-0.5 [-webkit-overflow-scrolling:touch]">
-          {todaySets.map((s, i) => (
-            <div
-              key={`${s.loggedAt}-${i}`}
-              className="flex shrink-0 flex-col items-center rounded-md border bg-muted/50 px-2 py-1.5 text-center"
-            >
-              <span className="text-[0.7rem] font-medium tabular-nums leading-none text-foreground">
-                {s.weightLb}lb
-              </span>
-              <span className="text-[0.65rem] tabular-nums text-muted-foreground">
-                ×{s.reps}
-              </span>
-            </div>
-          ))}
-          <div className="flex shrink-0 items-end gap-1">
-            <div className="grid w-[3.25rem] gap-0.5">
-              <Label htmlFor={`reps-${exercise.id}`} className="sr-only">
-                Reps
-              </Label>
-              <Input
-                id={`reps-${exercise.id}`}
-                inputMode="numeric"
-                placeholder="reps"
-                value={draft.reps}
-                onChange={(e) => onDraftChange("reps", e.target.value)}
-                className="h-10 px-1 text-center text-sm tabular-nums"
-              />
-            </div>
-            <div className="grid w-[3.25rem] gap-0.5">
-              <Label htmlFor={`lbs-${exercise.id}`} className="sr-only">
-                Weight in lb
-              </Label>
-              <Input
-                id={`lbs-${exercise.id}`}
-                inputMode="decimal"
-                placeholder="lb"
-                value={draft.lbs}
-                onChange={(e) => onDraftChange("lbs", e.target.value)}
-                className="h-10 px-1 text-center text-sm tabular-nums"
-              />
-            </div>
-            <Button
-              type="button"
-              size="icon"
-              variant="secondary"
-              disabled={!canLog}
-              className="size-10 shrink-0 touch-manipulation"
-              aria-label={`Log set for ${exercise.name}`}
-              onClick={onLog}
-            >
-              <Check className="size-5" aria-hidden />
-            </Button>
-          </div>
+    <article className="border-b py-3">
+      <div className="flex items-end gap-2 sm:gap-3">
+        <div className="min-w-0 flex-1">
+          <h2 className="text-sm font-semibold leading-snug">{exercise.name}</h2>
         </div>
-      </td>
-    </tr>
+        <div className="flex shrink-0 flex-nowrap items-end gap-1">
+          <div className="grid w-[3.25rem] gap-0.5">
+            <Label htmlFor={`draft-reps-${exercise.id}`} className="sr-only">
+              Reps for new set
+            </Label>
+            <Input
+              id={`draft-reps-${exercise.id}`}
+              inputMode="numeric"
+              placeholder="reps"
+              value={draft.reps}
+              onChange={(e) => onDraftChange("reps", e.target.value)}
+              className="h-9 px-1 text-center text-sm tabular-nums"
+            />
+          </div>
+          <div className="grid w-[3.25rem] gap-0.5">
+            <Label htmlFor={`draft-lbs-${exercise.id}`} className="sr-only">
+              Weight for new set
+            </Label>
+            <Input
+              id={`draft-lbs-${exercise.id}`}
+              inputMode="decimal"
+              placeholder="lb"
+              value={draft.lbs}
+              onChange={(e) => onDraftChange("lbs", e.target.value)}
+              className="h-9 px-1 text-center text-sm tabular-nums"
+            />
+          </div>
+          <Button
+            type="button"
+            size="icon"
+            variant="secondary"
+            disabled={!canLog}
+            className="size-10 shrink-0 touch-manipulation"
+            aria-label={`Log set for ${exercise.name}`}
+            onClick={onLog}
+          >
+            <Check className="size-5" aria-hidden />
+          </Button>
+        </div>
+      </div>
+
+      <div className="mt-2 flex items-end gap-2 sm:gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-muted-foreground">
+            Last
+          </p>
+          <p className="mt-0.5 text-xs leading-snug text-muted-foreground">
+            {prior ? (
+              <>
+                <span className="font-medium text-foreground">
+                  {formatShortDate(prior.date)}
+                </span>
+                <span className="text-muted-foreground">
+                  {" · "}
+                  {summarizeSession(prior)}
+                </span>
+              </>
+            ) : (
+              <span>No prior log</span>
+            )}
+          </p>
+        </div>
+        <div className="flex min-w-0 flex-1 flex-row flex-wrap items-end justify-end gap-x-1 gap-y-1">
+          {todaySets.map((set, setIndex) => (
+            <LoggedSetPair
+              key={set.loggedAt}
+              exerciseId={exercise.id}
+              set={set}
+              setIndex={setIndex}
+              onSave={(reps, weightLb) => onUpdateTodaySet(setIndex, reps, weightLb)}
+            />
+          ))}
+        </div>
+      </div>
+    </article>
   )
 }
 
-function LastWorkoutCell({ prior }: { prior: DaySession | null }) {
-  if (!prior) {
-    return (
-      <div className="flex min-w-0 flex-col gap-0.5 text-xs leading-snug">
-        <span className="text-muted-foreground">—</span>
-        <span className="text-muted-foreground">No prior log</span>
-      </div>
-    )
+function LoggedSetPair({
+  exerciseId,
+  set,
+  setIndex,
+  onSave,
+}: {
+  exerciseId: string
+  set: LoggedSet
+  setIndex: number
+  onSave: (reps: number, weightLb: number) => void
+}) {
+  const [repsStr, setRepsStr] = useState(String(set.reps))
+  const [lbsStr, setLbsStr] = useState(String(set.weightLb))
+  const wrapRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    setRepsStr(String(set.reps))
+    setLbsStr(String(set.weightLb))
+  }, [set.reps, set.weightLb, set.loggedAt])
+
+  const flush = useCallback(() => {
+    const r = Number.parseInt(repsStr, 10)
+    const w = Number.parseFloat(lbsStr)
+    if (!Number.isFinite(r) || r <= 0 || !Number.isFinite(w) || w <= 0) {
+      setRepsStr(String(set.reps))
+      setLbsStr(String(set.weightLb))
+      return
+    }
+    if (r !== set.reps || w !== set.weightLb) {
+      onSave(r, w)
+    }
+  }, [lbsStr, onSave, repsStr, set.reps, set.weightLb])
+
+  const onBlurGroup = (e: React.FocusEvent<HTMLDivElement>) => {
+    const next = e.relatedTarget as Node | null
+    if (wrapRef.current?.contains(next)) return
+    flush()
   }
+
+  const idBase = `${exerciseId}-${set.loggedAt}-${setIndex}`
+
   return (
-    <div className="flex min-w-0 flex-col gap-0.5 text-xs leading-snug">
-      <span className="font-medium text-foreground">
-        {formatShortDate(prior.date)}
-      </span>
-      <span className="text-muted-foreground">{summarizeSession(prior)}</span>
+    <div
+      ref={wrapRef}
+      className="flex shrink-0 items-end gap-0.5"
+      onBlur={onBlurGroup}
+    >
+      <Input
+        id={`${idBase}-reps`}
+        inputMode="numeric"
+        aria-label={`Reps set ${setIndex + 1}`}
+        value={repsStr}
+        onChange={(e) => setRepsStr(e.target.value)}
+        className={cn(
+          "h-9 w-[3.25rem] px-1 text-center text-sm tabular-nums",
+          ghostInput
+        )}
+      />
+      <Input
+        id={`${idBase}-lbs`}
+        inputMode="decimal"
+        aria-label={`Weight set ${setIndex + 1}`}
+        value={lbsStr}
+        onChange={(e) => setLbsStr(e.target.value)}
+        className={cn(
+          "h-9 w-[3.25rem] px-1 text-center text-sm tabular-nums",
+          ghostInput
+        )}
+      />
     </div>
   )
 }

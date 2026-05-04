@@ -78,7 +78,7 @@ export function summarizeSession(session: DaySession): string {
   const n = session.sets.length
   if (n === 0) return "—"
   const last = session.sets[n - 1]
-  return `${n} set${n === 1 ? "" : "s"} · ${last.weightLb}lb × ${last.reps} rep`
+  return `${n} set${n === 1 ? "" : "s"}, ${last.reps} rep, ${last.weightLb} lb`
 }
 
 export function loadWorkoutState(): WorkoutAppState {
