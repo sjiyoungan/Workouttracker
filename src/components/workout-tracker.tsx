@@ -13,7 +13,6 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
-import { cn } from "@/lib/utils"
 import type { Exercise, LoggedSet, WorkoutAppState } from "@/lib/workout-model"
 import {
   lastSessionBeforeToday,
@@ -22,16 +21,9 @@ import {
   saveWorkoutState,
   summarizeSession,
   todaySession,
-  formatShortDate,
 } from "@/lib/workout-model"
 
 type Draft = { reps: string; lbs: string }
-
-const ghostInput =
-  "border-transparent bg-transparent shadow-none ring-0 outline-none " +
-  "focus-visible:border-input focus-visible:bg-background focus-visible:shadow-sm " +
-  "focus-visible:ring-1 focus-visible:ring-ring " +
-  "placeholder:text-muted-foreground/50"
 
 export default function WorkoutTracker() {
   const [state, setState] = useState<WorkoutAppState>(loadWorkoutState)
@@ -331,6 +323,8 @@ function ExerciseRow({
   const today = todaySession(state, exercise.id, todayStr)
   const todaySets = today?.sets ?? []
 
+  const nextSetNumber = todaySets.length + 1
+
   const repsOk = Number.parseInt(draft.reps, 10)
   const lbsOk = Number.parseFloat(draft.lbs)
   const canLog =
@@ -341,75 +335,23 @@ function ExerciseRow({
 
   return (
     <article className="border-b py-3">
-      <div className="flex items-end gap-2 sm:gap-3">
-        <div className="min-w-0 flex-1">
-          <h2 className="text-sm font-semibold leading-snug">{exercise.name}</h2>
-        </div>
-        <div className="flex shrink-0 flex-nowrap items-end gap-1">
-          <div className="grid w-[3.25rem] gap-0.5">
-            <Label htmlFor={`draft-reps-${exercise.id}`} className="sr-only">
-              Reps for new set
-            </Label>
-            <Input
-              id={`draft-reps-${exercise.id}`}
-              inputMode="numeric"
-              placeholder="reps"
-              value={draft.reps}
-              onChange={(e) => onDraftChange("reps", e.target.value)}
-              className="h-9 px-1 text-center text-sm tabular-nums"
-            />
-          </div>
-          <div className="grid w-[3.25rem] gap-0.5">
-            <Label htmlFor={`draft-lbs-${exercise.id}`} className="sr-only">
-              Weight for new set
-            </Label>
-            <Input
-              id={`draft-lbs-${exercise.id}`}
-              inputMode="decimal"
-              placeholder="lb"
-              value={draft.lbs}
-              onChange={(e) => onDraftChange("lbs", e.target.value)}
-              className="h-9 px-1 text-center text-sm tabular-nums"
-            />
-          </div>
-          <Button
-            type="button"
-            size="icon"
-            variant="secondary"
-            disabled={!canLog}
-            className="size-10 shrink-0 touch-manipulation"
-            aria-label={`Log set for ${exercise.name}`}
-            onClick={onLog}
-          >
-            <Check className="size-5" aria-hidden />
-          </Button>
-        </div>
-      </div>
+      <h2 className="text-sm font-semibold leading-snug">{exercise.name}</h2>
 
-      <div className="mt-2 flex items-end gap-2 sm:gap-3">
-        <div className="min-w-0 flex-1">
-          <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-muted-foreground">
-            Last
-          </p>
-          <p className="mt-0.5 text-xs leading-snug text-muted-foreground">
-            {prior ? (
-              <>
-                <span className="font-medium text-foreground">
-                  {formatShortDate(prior.date)}
-                </span>
-                <span className="text-muted-foreground">
-                  {" · "}
-                  {summarizeSession(prior)}
-                </span>
-              </>
-            ) : (
-              <span>No prior log</span>
-            )}
-          </p>
+      <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1">
+        <div className="text-[0.65rem] font-semibold uppercase tracking-wide text-muted-foreground">
+          Last
         </div>
-        <div className="flex min-w-0 flex-1 flex-row flex-wrap items-end justify-end gap-x-1 gap-y-1">
+        <div className="text-right text-[0.65rem] font-semibold uppercase tracking-wide text-muted-foreground">
+          Set {nextSetNumber}
+        </div>
+
+        <div className="min-w-0 self-start text-xs leading-snug text-muted-foreground">
+          {prior ? summarizeSession(prior) : "No prior log"}
+        </div>
+
+        <div className="flex min-w-0 flex-col items-end gap-2">
           {todaySets.map((set, setIndex) => (
-            <LoggedSetPair
+            <LoggedSetLine
               key={set.loggedAt}
               exerciseId={exercise.id}
               set={set}
@@ -417,13 +359,42 @@ function ExerciseRow({
               onSave={(reps, weightLb) => onUpdateTodaySet(setIndex, reps, weightLb)}
             />
           ))}
+          <div className="flex flex-nowrap items-end justify-end gap-1">
+            <Input
+              id={`draft-reps-${exercise.id}`}
+              inputMode="numeric"
+              aria-label="Reps for next set"
+              value={draft.reps}
+              onChange={(e) => onDraftChange("reps", e.target.value)}
+              className="h-9 w-[3.25rem] px-1 text-center text-sm tabular-nums"
+            />
+            <Input
+              id={`draft-lbs-${exercise.id}`}
+              inputMode="decimal"
+              aria-label="Weight in lb for next set"
+              value={draft.lbs}
+              onChange={(e) => onDraftChange("lbs", e.target.value)}
+              className="h-9 w-[3.25rem] px-1 text-center text-sm tabular-nums"
+            />
+            <Button
+              type="button"
+              size="icon"
+              variant="secondary"
+              disabled={!canLog}
+              className="size-10 shrink-0 touch-manipulation"
+              aria-label={`Log set ${nextSetNumber} for ${exercise.name}`}
+              onClick={onLog}
+            >
+              <Check className="size-5" aria-hidden />
+            </Button>
+          </div>
         </div>
       </div>
     </article>
   )
 }
 
-function LoggedSetPair({
+function LoggedSetLine({
   exerciseId,
   set,
   setIndex,
@@ -434,6 +405,7 @@ function LoggedSetPair({
   setIndex: number
   onSave: (reps: number, weightLb: number) => void
 }) {
+  const [editing, setEditing] = useState(false)
   const [repsStr, setRepsStr] = useState(String(set.reps))
   const [lbsStr, setLbsStr] = useState(String(set.weightLb))
   const wrapRef = useRef<HTMLDivElement>(null)
@@ -449,11 +421,10 @@ function LoggedSetPair({
     if (!Number.isFinite(r) || r <= 0 || !Number.isFinite(w) || w <= 0) {
       setRepsStr(String(set.reps))
       setLbsStr(String(set.weightLb))
-      return
-    }
-    if (r !== set.reps || w !== set.weightLb) {
+    } else if (r !== set.reps || w !== set.weightLb) {
       onSave(r, w)
     }
+    setEditing(false)
   }, [lbsStr, onSave, repsStr, set.reps, set.weightLb])
 
   const onBlurGroup = (e: React.FocusEvent<HTMLDivElement>) => {
@@ -464,33 +435,40 @@ function LoggedSetPair({
 
   const idBase = `${exerciseId}-${set.loggedAt}-${setIndex}`
 
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        className="max-w-[12rem] touch-manipulation rounded-md px-2 py-1.5 text-right text-sm tabular-nums text-foreground hover:bg-muted/70 active:bg-muted"
+        onClick={() => setEditing(true)}
+      >
+        {set.reps} reps {set.weightLb}lbs
+      </button>
+    )
+  }
+
   return (
     <div
       ref={wrapRef}
-      className="flex shrink-0 items-end gap-0.5"
+      className="flex max-w-[12rem] justify-end gap-1"
       onBlur={onBlurGroup}
     >
       <Input
         id={`${idBase}-reps`}
+        autoFocus
         inputMode="numeric"
-        aria-label={`Reps set ${setIndex + 1}`}
+        aria-label={`Set ${setIndex + 1} reps`}
         value={repsStr}
         onChange={(e) => setRepsStr(e.target.value)}
-        className={cn(
-          "h-9 w-[3.25rem] px-1 text-center text-sm tabular-nums",
-          ghostInput
-        )}
+        className="h-9 w-[3.25rem] px-1 text-center text-sm tabular-nums"
       />
       <Input
         id={`${idBase}-lbs`}
         inputMode="decimal"
-        aria-label={`Weight set ${setIndex + 1}`}
+        aria-label={`Set ${setIndex + 1} weight in lb`}
         value={lbsStr}
         onChange={(e) => setLbsStr(e.target.value)}
-        className={cn(
-          "h-9 w-[3.25rem] px-1 text-center text-sm tabular-nums",
-          ghostInput
-        )}
+        className="h-9 w-[3.25rem] px-1 text-center text-sm tabular-nums"
       />
     </div>
   )
