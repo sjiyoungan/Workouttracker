@@ -58,10 +58,16 @@ export default function WorkoutTracker() {
     return before.length ? before[before.length - 1]! : null
   }, [loggedDatesSorted, viewDate])
 
-  const nextLoggedDate = useMemo(() => {
-    const after = loggedDatesSorted.filter((d) => d > viewDate)
-    return after.length ? after[0]! : null
-  }, [loggedDatesSorted, viewDate])
+  /** Next screen when moving forward from history: earliest logged day after view and on/before today, else today (even if today has no logs). */
+  const canGoForward = viewDate < calendarToday
+
+  const forwardTargetDate = useMemo(() => {
+    if (!(viewDate < calendarToday)) return calendarToday
+    const nextRecorded = loggedDatesSorted.find(
+      (d) => d > viewDate && d <= calendarToday
+    )
+    return nextRecorded ?? calendarToday
+  }, [calendarToday, loggedDatesSorted, viewDate])
 
   useEffect(() => {
     saveWorkoutState(state)
@@ -292,14 +298,14 @@ export default function WorkoutTracker() {
               </PopoverContent>
             </Popover>
 
-            {nextLoggedDate ? (
+            {canGoForward ? (
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
                 className="size-9 shrink-0 touch-manipulation"
-                aria-label="Next logged day"
-                onClick={() => setViewDate(nextLoggedDate)}
+                aria-label="Next logged day or today"
+                onClick={() => setViewDate(forwardTargetDate)}
               >
                 <ChevronRight className="size-5" />
               </Button>
