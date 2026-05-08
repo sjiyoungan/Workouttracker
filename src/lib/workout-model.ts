@@ -15,6 +15,7 @@ export type Exercise = {
   id: string
   name: string
   createdAt: string
+  youtubeUrl?: string
 }
 
 export type WorkoutAppState = {

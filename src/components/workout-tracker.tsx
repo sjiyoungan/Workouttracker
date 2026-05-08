@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { ChevronLeft, ChevronRight, Plus, UserRound } from "lucide-react"
+import {
+  ChevronLeft,
+  ChevronRight,
+  ExternalLink,
+  Plus,
+  Trash2,
+  UserRound,
+} from "lucide-react"
 import { DayPicker } from "react-day-picker"
 
 import { Button } from "@/components/ui/button"
@@ -19,6 +26,21 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 import { Separator } from "@/components/ui/separator"
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import type { Exercise, LoggedSet, WorkoutAppState } from "@/lib/workout-model"
 import {
   allDatesWithLogs,
@@ -29,6 +51,7 @@ import {
   localDateString,
   saveWorkoutState,
   sessionOnDate,
+  sessionsForExercise,
 } from "@/lib/workout-model"
 
 type Draft = { reps: string; lbs: string }
@@ -48,6 +71,9 @@ export default function WorkoutTracker() {
   const [addOpen, setAddOpen] = useState(false)
   const [addName, setAddName] = useState("")
   const [addError, setAddError] = useState("")
+
+  const [detailsExerciseId, setDetailsExerciseId] = useState<string | null>(null)
+  const [deleteExerciseId, setDeleteExerciseId] = useState<string | null>(null)
 
   const loggedDatesSet = useMemo(() => new Set(allDatesWithLogs(state)), [state])
   const loggedDatesSorted = useMemo(() => allDatesWithLogs(state), [state])
@@ -214,6 +240,35 @@ export default function WorkoutTracker() {
     }))
   }
 
+  const deleteExercise = useCallback(
+    (exerciseId: string) => {
+      setState((s) => {
+        const exercises = s.exercises.filter((e) => e.id !== exerciseId)
+        const sessionsByExerciseId = { ...s.sessionsByExerciseId }
+        delete sessionsByExerciseId[exerciseId]
+        return { ...s, exercises, sessionsByExerciseId }
+      })
+      setDrafts((d) => {
+        const next = { ...d }
+        delete next[exerciseId]
+        return next
+      })
+      setDetailsExerciseId((cur) => (cur === exerciseId ? null : cur))
+      setDeleteExerciseId(null)
+    },
+    []
+  )
+
+  const updateExerciseYoutubeUrl = useCallback((exerciseId: string, url: string) => {
+    const trimmed = url.trim()
+    setState((s) => ({
+      ...s,
+      exercises: s.exercises.map((e) =>
+        e.id === exerciseId ? { ...e, youtubeUrl: trimmed || undefined } : e
+      ),
+    }))
+  }, [])
+
   const goToday = useCallback(() => {
     setViewDate(localDateString())
     setCalendarOpen(false)
@@ -337,6 +392,8 @@ export default function WorkoutTracker() {
                 onUpdateSet={(setIndex, reps, weightLb) =>
                   updateSetOnDate(ex.id, setIndex, reps, weightLb, viewDate)
                 }
+                onOpenDetails={() => setDetailsExerciseId(ex.id)}
+                onRequestDelete={() => setDeleteExerciseId(ex.id)}
               />
             ))}
           </div>
@@ -422,6 +479,37 @@ export default function WorkoutTracker() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={deleteExerciseId !== null} onOpenChange={(o) => !o && setDeleteExerciseId(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete workout?</DialogTitle>
+            <DialogDescription>
+              This removes the exercise and all of its saved logs on this device.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setDeleteExerciseId(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => deleteExerciseId && deleteExercise(deleteExerciseId)}
+            >
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <ExerciseDetailsSheet
+        open={detailsExerciseId !== null}
+        onOpenChange={(o) => !o && setDetailsExerciseId(null)}
+        exercise={state.exercises.find((e) => e.id === detailsExerciseId) ?? null}
+        state={state}
+        onUpdateYoutubeUrl={updateExerciseYoutubeUrl}
+      />
     </div>
   )
 }
@@ -437,6 +525,8 @@ function ExerciseRow({
   onDraftChange,
   onCommitDraft,
   onUpdateSet,
+  onOpenDetails,
+  onRequestDelete,
 }: {
   exercise: Exercise
   state: WorkoutAppState
@@ -446,14 +536,66 @@ function ExerciseRow({
   onDraftChange: (field: keyof Draft, value: string) => void
   onCommitDraft: () => void
   onUpdateSet: (setIndex: number, reps: number, weightLb: number) => void
+  onOpenDetails: () => void
+  onRequestDelete: () => void
 }) {
   const prior = lastSessionBeforeDate(state, exercise.id, viewDate)
   const session = sessionOnDate(state, exercise.id, viewDate)
   const sets = session?.sets ?? []
+  const longPressFiredRef = useRef(false)
+  const longPressTimerRef = useRef<number | null>(null)
 
   return (
-    <article className="border-b py-3">
-      <h2 className="px-1 text-sm font-semibold leading-snug">{exercise.name}</h2>
+    <article
+      className="border-b py-3"
+      onClick={(e) => {
+        if (longPressFiredRef.current) return
+        const t = e.target as HTMLElement | null
+        if (!t) return
+        if (t.closest("input,button,a,textarea,select,[data-interactive='true']")) return
+        onOpenDetails()
+      }}
+      onPointerDown={() => {
+        longPressFiredRef.current = false
+        if (longPressTimerRef.current) window.clearTimeout(longPressTimerRef.current)
+        longPressTimerRef.current = window.setTimeout(() => {
+          longPressFiredRef.current = true
+          onRequestDelete()
+        }, 650)
+      }}
+      onPointerUp={() => {
+        if (longPressTimerRef.current) window.clearTimeout(longPressTimerRef.current)
+        longPressTimerRef.current = null
+      }}
+      onPointerCancel={() => {
+        if (longPressTimerRef.current) window.clearTimeout(longPressTimerRef.current)
+        longPressTimerRef.current = null
+      }}
+      onContextMenu={(e) => {
+        // Desktop fallback.
+        e.preventDefault()
+        onRequestDelete()
+      }}
+    >
+      <div className="flex items-center justify-between gap-2 px-1">
+        <h2 className="min-w-0 flex-1 truncate text-sm font-semibold leading-snug">
+          {exercise.name}
+        </h2>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-9 shrink-0"
+          data-interactive="true"
+          aria-label="Delete exercise"
+          onClick={(e) => {
+            e.stopPropagation()
+            onRequestDelete()
+          }}
+        >
+          <Trash2 className="size-4" />
+        </Button>
+      </div>
       <div className="mt-2 flex w-full overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
         <div className="sticky left-0 z-10 flex w-[6.25rem] shrink-0 flex-col border-r border-border bg-background px-1.5 py-0.5 pr-2">
           <div className="text-[0.65rem] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -537,6 +679,7 @@ function DraftSetPair({
       ref={wrapRef}
       className="mt-1 flex w-full flex-nowrap justify-center gap-1"
       onBlur={onBlurGroup}
+      data-interactive="true"
     >
       <Input
         id={`draft-reps-${exerciseId}`}
@@ -607,6 +750,7 @@ function LoggedSetCell({
         type="button"
         className="mt-1 w-full touch-manipulation rounded-md px-1 py-1.5 text-center text-xs tabular-nums leading-snug text-foreground hover:bg-muted/70 active:bg-muted"
         onClick={() => setEditing(true)}
+        data-interactive="true"
       >
         {set.reps} reps {set.weightLb}lbs
       </button>
@@ -618,6 +762,7 @@ function LoggedSetCell({
       ref={wrapRef}
       className="mt-1 flex w-full flex-nowrap justify-center gap-1"
       onBlur={onBlurGroup}
+      data-interactive="true"
     >
       <Input
         id={`${idBase}-reps`}
@@ -639,5 +784,211 @@ function LoggedSetCell({
         className="h-9 w-[2.75rem] min-w-0 flex-1 px-1 text-center text-sm tabular-nums"
       />
     </div>
+  )
+}
+
+function ExerciseDetailsSheet({
+  open,
+  onOpenChange,
+  exercise,
+  state,
+  onUpdateYoutubeUrl,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  exercise: Exercise | null
+  state: WorkoutAppState
+  onUpdateYoutubeUrl: (exerciseId: string, url: string) => void
+}) {
+  const [draftUrl, setDraftUrl] = useState("")
+
+  useEffect(() => {
+    setDraftUrl(exercise?.youtubeUrl ?? "")
+  }, [exercise?.id, exercise?.youtubeUrl])
+
+  const history = useMemo(() => {
+    if (!exercise) return []
+    const sessions = sessionsForExercise(state, exercise.id)
+      .filter((s) => s.sets.length > 0)
+      .slice()
+      .sort((a, b) => (a.date < b.date ? -1 : 1))
+    const rows: Array<{
+      date: string
+      setNumber: number
+      reps: number
+      weightLb: number
+    }> = []
+    for (const s of sessions) {
+      s.sets.forEach((set, i) => {
+        rows.push({
+          date: s.date,
+          setNumber: i + 1,
+          reps: set.reps,
+          weightLb: set.weightLb,
+        })
+      })
+    }
+    return rows
+  }, [exercise, state])
+
+  const trend = useMemo(() => {
+    if (!exercise) return []
+    const sessions = sessionsForExercise(state, exercise.id)
+      .filter((s) => s.sets.length > 0)
+      .slice()
+      .sort((a, b) => (a.date < b.date ? -1 : 1))
+    return sessions.map((s) => {
+      const last = s.sets[s.sets.length - 1]!
+      return { date: s.date, value: last.weightLb }
+    })
+  }, [exercise, state])
+
+  const safeUrl = useMemo(() => {
+    const u = (exercise?.youtubeUrl ?? "").trim()
+    if (!u) return null
+    try {
+      const parsed = new URL(u)
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null
+      return parsed.toString()
+    } catch {
+      return null
+    }
+  }, [exercise?.youtubeUrl])
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent side="bottom" className="max-h-[85svh] overflow-y-auto">
+        <SheetHeader>
+          <SheetTitle>{exercise?.name ?? "Workout"}</SheetTitle>
+          <SheetDescription>
+            Trend, full history, and optional video link.
+          </SheetDescription>
+        </SheetHeader>
+
+        <div className="grid gap-3">
+          <div className="rounded-lg border p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <div className="text-sm font-semibold">Trend</div>
+              <div className="text-xs text-muted-foreground">Last set weight</div>
+            </div>
+            <Sparkline data={trend.map((t) => t.value)} />
+          </div>
+
+          <div className="rounded-lg border p-3">
+            <div className="mb-2 text-sm font-semibold">YouTube</div>
+            <div className="grid gap-2">
+              <Input
+                value={draftUrl}
+                onChange={(e) => setDraftUrl(e.target.value)}
+                placeholder="Paste a YouTube link"
+                onBlur={() => {
+                  if (exercise) onUpdateYoutubeUrl(exercise.id, draftUrl)
+                }}
+              />
+              {safeUrl ? (
+                <a
+                  href={safeUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-2 text-sm font-medium text-primary underline-offset-4 hover:underline"
+                >
+                  Open video <ExternalLink className="size-4" aria-hidden />
+                </a>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Add a valid https link to enable opening in a new tab.
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-lg border">
+            <div className="flex items-center justify-between border-b px-3 py-2">
+              <div className="text-sm font-semibold">All sets</div>
+              <div className="text-xs text-muted-foreground">
+                {history.length ? `${history.length} entries` : "No logs yet"}
+              </div>
+            </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Date</TableHead>
+                  <TableHead className="text-right">Set</TableHead>
+                  <TableHead className="text-right">Reps</TableHead>
+                  <TableHead className="text-right">lbs</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {history.map((r, i) => (
+                  <TableRow key={`${r.date}-${r.setNumber}-${i}`}>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {r.date}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {r.setNumber}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {r.reps}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {r.weightLb}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
+      </SheetContent>
+    </Sheet>
+  )
+}
+
+function Sparkline({ data }: { data: number[] }) {
+  const w = 320
+  const h = 64
+  const pad = 6
+  if (!data.length) {
+    return (
+      <div className="flex h-16 items-center justify-center text-xs text-muted-foreground">
+        No data yet
+      </div>
+    )
+  }
+  const min = Math.min(...data)
+  const max = Math.max(...data)
+  const span = Math.max(1, max - min)
+  const points = data
+    .map((v, i) => {
+      const x = pad + (i * (w - pad * 2)) / Math.max(1, data.length - 1)
+      const y = pad + (1 - (v - min) / span) * (h - pad * 2)
+      return `${x},${y}`
+    })
+    .join(" ")
+
+  return (
+    <svg
+      viewBox={`0 0 ${w} ${h}`}
+      className="h-16 w-full"
+      role="img"
+      aria-label="Trend sparkline"
+    >
+      <polyline
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        className="text-primary"
+        points={points}
+      />
+      <polyline
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="text-primary/15"
+        points={points}
+      />
+    </svg>
   )
 }
