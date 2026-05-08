@@ -274,11 +274,15 @@ export default function WorkoutTracker() {
     setCalendarOpen(false)
   }, [])
 
-  const calendarDisabled = (date: Date) => {
-    const k = localDateString(date)
-    if (k > calendarToday) return true
-    return !loggedDatesSet.has(k)
-  }
+  /** Only future dates are disabled; any past/today day is selectable even with no logs. */
+  const calendarDisabled = (date: Date) => localDateString(date) > calendarToday
+
+  const calendarModifiers = useMemo(
+    () => ({
+      hasLog: (date: Date) => loggedDatesSet.has(localDateString(date)),
+    }),
+    [loggedDatesSet]
+  )
 
   return (
     <div className="flex min-h-svh flex-col bg-background">
@@ -340,11 +344,16 @@ export default function WorkoutTracker() {
                     onSelect={(d) => {
                       if (!d) return
                       const k = localDateString(d)
-                      if (!loggedDatesSet.has(k) || k > calendarToday) return
+                      if (k > calendarToday) return
                       setViewDate(k)
                       setCalendarOpen(false)
                     }}
                     disabled={calendarDisabled}
+                    modifiers={calendarModifiers}
+                    modifiersClassNames={{
+                      hasLog:
+                        "bg-muted text-foreground font-medium rounded-md aria-selected:font-semibold",
+                    }}
                     defaultMonth={dateFromYmd(viewDate)}
                     className="rdp-root [--rdp-accent-color:theme(colors.primary)] [--rdp-background-color:theme(colors.background)]"
                   />
