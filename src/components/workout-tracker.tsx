@@ -29,7 +29,6 @@ import {
   localDateString,
   saveWorkoutState,
   sessionOnDate,
-  summarizeSession,
 } from "@/lib/workout-model"
 
 type Draft = { reps: string; lbs: string }
@@ -455,17 +454,17 @@ function ExerciseRow({
   return (
     <article className="border-b py-3">
       <h2 className="px-1 text-sm font-semibold leading-snug">{exercise.name}</h2>
-      <div className="mt-2 -mx-1 flex overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
-        <div className="sticky left-0 z-10 flex max-w-[6.75rem] min-w-[5.25rem] shrink-0 flex-col border-r border-border bg-background px-1.5 py-0.5 pr-2">
+      <div className="mt-2 flex w-full overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
+        <div className="sticky left-0 z-10 flex w-[6.25rem] shrink-0 flex-col border-r border-border bg-background px-1.5 py-0.5 pr-2">
           <div className="text-[0.65rem] font-semibold uppercase tracking-wide text-muted-foreground">
-            Last
+            LAST
           </div>
-          <p className="mt-1 text-xs leading-snug text-muted-foreground">
-            {prior ? summarizeSession(prior) : "No prior log"}
-          </p>
+          <div className="mt-1 text-xs leading-snug text-muted-foreground">
+            {prior ? <LastSummaryTwoLine session={prior} /> : "No prior log"}
+          </div>
         </div>
 
-        <div className="flex min-w-min flex-nowrap items-start gap-3 pl-3 pr-1 pt-0.5">
+        <div className="flex w-max flex-nowrap items-start gap-3 pl-3 pr-1 pt-0.5">
           {sets.map((set, setIndex) => (
             <div
               key={set.loggedAt}
@@ -498,6 +497,19 @@ function ExerciseRow({
         </div>
       </div>
     </article>
+  )
+}
+
+function LastSummaryTwoLine({ session }: { session: { sets: LoggedSet[] } }) {
+  const n = session.sets.length
+  const last = session.sets[n - 1]
+  return (
+    <div className="flex flex-col gap-0.5">
+      <div>{n} set</div>
+      <div>
+        {last.reps} reps {last.weightLb}lbs
+      </div>
+    </div>
   )
 }
 
