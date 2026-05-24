@@ -1,8 +1,28 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
+  DndContext,
+  type DragEndEvent,
+  type DraggableAttributes,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core"
+import type { SyntheticListenerMap } from "@dnd-kit/core/dist/hooks/utilities"
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable"
+import { CSS } from "@dnd-kit/utilities"
+import {
   ChevronLeft,
   ChevronRight,
   ExternalLink,
+  GripVertical,
   Plus,
   Trash2,
   UserRound,
@@ -41,6 +61,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { cn } from "@/lib/utils"
 import type { Exercise, LoggedSet, WorkoutAppState } from "@/lib/workout-model"
 import {
   allDatesWithLogs,
@@ -74,6 +95,17 @@ export default function WorkoutTracker() {
 
   const [detailsExerciseId, setDetailsExerciseId] = useState<string | null>(null)
   const [deleteExerciseId, setDeleteExerciseId] = useState<string | null>(null)
+  const [reorderMode, setReorderMode] = useState(false)
+
+  const exerciseIds = useMemo(
+    () => state.exercises.map((e) => e.id),
+    [state.exercises]
+  )
+
+  const reorderSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  )
 
   const loggedDatesSet = useMemo(() => new Set(allDatesWithLogs(state)), [state])
   const loggedDatesSorted = useMemo(() => allDatesWithLogs(state), [state])
@@ -274,6 +306,20 @@ export default function WorkoutTracker() {
     setCalendarOpen(false)
   }, [])
 
+  const handleDragEnd = useCallback((event: DragEndEvent) => {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    setState((s) => {
+      const oldIndex = s.exercises.findIndex((e) => e.id === active.id)
+      const newIndex = s.exercises.findIndex((e) => e.id === over.id)
+      if (oldIndex === -1 || newIndex === -1) return s
+      return {
+        ...s,
+        exercises: arrayMove(s.exercises, oldIndex, newIndex),
+      }
+    })
+  }, [])
+
   /** Only future dates are disabled; any past/today day is selectable even with no logs. */
   const calendarDisabled = (date: Date) => localDateString(date) > calendarToday
 
@@ -377,7 +423,19 @@ export default function WorkoutTracker() {
             )}
           </div>
 
-          <div aria-hidden className="min-w-0" />
+          <div className="flex min-w-0 justify-end">
+            {state.exercises.length > 0 ? (
+              <Button
+                type="button"
+                variant={reorderMode ? "secondary" : "ghost"}
+                size="sm"
+                className="h-9 touch-manipulation px-2 text-xs font-semibold"
+                onClick={() => setReorderMode((v) => !v)}
+              >
+                {reorderMode ? "Done" : "Reorder"}
+              </Button>
+            ) : null}
+          </div>
         </div>
       </header>
 
@@ -386,6 +444,35 @@ export default function WorkoutTracker() {
           <p className="py-10 text-center text-sm text-muted-foreground">
             No exercises yet. Add one below to start logging sets.
           </p>
+        ) : reorderMode ? (
+          <DndContext
+            sensors={reorderSensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={exerciseIds}
+              strategy={verticalListSortingStrategy}
+            >
+              <div className="flex flex-col">
+                {state.exercises.map((ex) => (
+                  <SortableExerciseRow
+                    key={ex.id}
+                    exercise={ex}
+                    state={state}
+                    viewDate={viewDate}
+                    isViewingToday={viewDate === calendarToday}
+                    draft={drafts[ex.id] ?? { reps: "", lbs: "" }}
+                    onDraftChange={(field, v) => setDraft(ex.id, field, v)}
+                    onCommitDraft={() => commitDraftIfValid(ex.id)}
+                    onUpdateSet={(setIndex, reps, weightLb) =>
+                      updateSetOnDate(ex.id, setIndex, reps, weightLb, viewDate)
+                    }
+                  />
+                ))}
+              </div>
+            </SortableContext>
+          </DndContext>
         ) : (
           <div className="flex flex-col">
             {state.exercises.map((ex) => (
@@ -402,7 +489,6 @@ export default function WorkoutTracker() {
                   updateSetOnDate(ex.id, setIndex, reps, weightLb, viewDate)
                 }
                 onOpenDetails={() => setDetailsExerciseId(ex.id)}
-                onRequestDelete={() => setDeleteExerciseId(ex.id)}
               />
             ))}
           </div>
@@ -518,12 +604,64 @@ export default function WorkoutTracker() {
         exercise={state.exercises.find((e) => e.id === detailsExerciseId) ?? null}
         state={state}
         onUpdateYoutubeUrl={updateExerciseYoutubeUrl}
+        onRequestDelete={() => {
+          if (!detailsExerciseId) return
+          setDeleteExerciseId(detailsExerciseId)
+          setDetailsExerciseId(null)
+        }}
       />
     </div>
   )
 }
 
 const SET_COL_W = "min-w-[5.75rem] w-[5.75rem] shrink-0"
+
+type ExerciseRowProps = {
+  exercise: Exercise
+  state: WorkoutAppState
+  viewDate: string
+  isViewingToday: boolean
+  draft: Draft
+  onDraftChange: (field: keyof Draft, value: string) => void
+  onCommitDraft: () => void
+  onUpdateSet: (setIndex: number, reps: number, weightLb: number) => void
+  onOpenDetails?: () => void
+  reorderMode?: boolean
+  dragHandleProps?: {
+    attributes: DraggableAttributes
+    listeners: SyntheticListenerMap | undefined
+  }
+}
+
+function SortableExerciseRow(props: Omit<ExerciseRowProps, "reorderMode" | "dragHandleProps">) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: props.exercise.id })
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  }
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={cn(isDragging && "relative z-50")}
+    >
+      <ExerciseRow
+        {...props}
+        reorderMode
+        dragHandleProps={{ attributes, listeners }}
+      />
+    </div>
+  )
+}
 
 function ExerciseRow({
   exercise,
@@ -535,77 +673,54 @@ function ExerciseRow({
   onCommitDraft,
   onUpdateSet,
   onOpenDetails,
-  onRequestDelete,
-}: {
-  exercise: Exercise
-  state: WorkoutAppState
-  viewDate: string
-  isViewingToday: boolean
-  draft: Draft
-  onDraftChange: (field: keyof Draft, value: string) => void
-  onCommitDraft: () => void
-  onUpdateSet: (setIndex: number, reps: number, weightLb: number) => void
-  onOpenDetails: () => void
-  onRequestDelete: () => void
-}) {
+  reorderMode = false,
+  dragHandleProps,
+}: ExerciseRowProps) {
   const prior = lastSessionBeforeDate(state, exercise.id, viewDate)
   const session = sessionOnDate(state, exercise.id, viewDate)
   const sets = session?.sets ?? []
-  const longPressFiredRef = useRef(false)
-  const longPressTimerRef = useRef<number | null>(null)
 
   return (
     <article
-      className="border-b py-3"
-      onClick={(e) => {
-        if (longPressFiredRef.current) return
-        const t = e.target as HTMLElement | null
-        if (!t) return
-        if (t.closest("input,button,a,textarea,select,[data-interactive='true']")) return
-        onOpenDetails()
-      }}
-      onPointerDown={() => {
-        longPressFiredRef.current = false
-        if (longPressTimerRef.current) window.clearTimeout(longPressTimerRef.current)
-        longPressTimerRef.current = window.setTimeout(() => {
-          longPressFiredRef.current = true
-          onRequestDelete()
-        }, 650)
-      }}
-      onPointerUp={() => {
-        if (longPressTimerRef.current) window.clearTimeout(longPressTimerRef.current)
-        longPressTimerRef.current = null
-      }}
-      onPointerCancel={() => {
-        if (longPressTimerRef.current) window.clearTimeout(longPressTimerRef.current)
-        longPressTimerRef.current = null
-      }}
-      onContextMenu={(e) => {
-        // Desktop fallback.
-        e.preventDefault()
-        onRequestDelete()
-      }}
+      className={cn(
+        "border-b py-3",
+        reorderMode && "cursor-grab touch-manipulation active:cursor-grabbing"
+      )}
+      {...(reorderMode && dragHandleProps
+        ? { ...dragHandleProps.attributes, ...dragHandleProps.listeners }
+        : {})}
     >
-      <div className="flex items-center justify-between gap-2 px-1">
+      <div className="flex items-center gap-1 px-1">
+        {reorderMode ? (
+          <div
+            className="flex size-9 shrink-0 items-center justify-center text-muted-foreground"
+            aria-hidden
+          >
+            <GripVertical className="size-5" />
+          </div>
+        ) : null}
         <h2 className="min-w-0 flex-1 truncate text-sm font-semibold leading-snug">
           {exercise.name}
         </h2>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="size-9 shrink-0"
-          data-interactive="true"
-          aria-label="Delete exercise"
-          onClick={(e) => {
-            e.stopPropagation()
-            onRequestDelete()
-          }}
-        >
-          <Trash2 className="size-4" />
-        </Button>
+        {!reorderMode && onOpenDetails ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-9 shrink-0 touch-manipulation"
+            aria-label={`View details for ${exercise.name}`}
+            onClick={onOpenDetails}
+          >
+            <ChevronRight className="size-5" />
+          </Button>
+        ) : null}
       </div>
-      <div className="mt-2 flex w-full overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
+      <div
+        className={cn(
+          "mt-2 flex w-full overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]",
+          reorderMode && "pointer-events-none select-none opacity-60"
+        )}
+      >
         <div className="sticky left-0 z-10 flex w-[6.25rem] shrink-0 flex-col border-r border-border bg-background px-1.5 py-0.5 pr-2">
           <div className="text-[0.65rem] font-semibold uppercase tracking-wide text-muted-foreground">
             LAST
@@ -802,12 +917,14 @@ function ExerciseDetailsSheet({
   exercise,
   state,
   onUpdateYoutubeUrl,
+  onRequestDelete,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   exercise: Exercise | null
   state: WorkoutAppState
   onUpdateYoutubeUrl: (exerciseId: string, url: string) => void
+  onRequestDelete: () => void
 }) {
   const [draftUrl, setDraftUrl] = useState("")
 
@@ -947,6 +1064,16 @@ function ExerciseDetailsSheet({
               </TableBody>
             </Table>
           </div>
+
+          <Button
+            type="button"
+            variant="destructive"
+            className="w-full touch-manipulation gap-2"
+            onClick={onRequestDelete}
+          >
+            <Trash2 className="size-4" aria-hidden />
+            Delete exercise
+          </Button>
         </div>
       </SheetContent>
     </Sheet>
