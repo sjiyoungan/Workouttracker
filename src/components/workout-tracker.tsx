@@ -13,7 +13,6 @@ import {
 import type { SyntheticListenerMap } from "@dnd-kit/core/dist/hooks/utilities"
 import {
   SortableContext,
-  arrayMove,
   sortableKeyboardCoordinates,
   useSortable,
   verticalListSortingStrategy,
@@ -62,16 +61,29 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import AddWorkoutDialog from "@/components/add-workout-dialog"
+import WorkoutDefaultsSettings from "@/components/workout-defaults-settings"
 import { cn } from "@/lib/utils"
+import { applyWorkoutDefaults } from "@/lib/apply-workout-defaults"
 import { useAuth } from "@/contexts/auth-context"
+import {
+  focusSetInput,
+  handleSetFieldKeyDown,
+  setInputId,
+} from "@/lib/set-input-nav"
 import type { Exercise, LoggedSet, WorkoutAppState } from "@/lib/workout-model"
 import {
+  addExerciseToDay,
   allDatesWithLogs,
   dateFromYmd,
+  deleteExerciseFromLibrary,
+  exercisesForDate,
   formatLogViewTitle,
   lastSessionBeforeDate,
   loadWorkoutState,
   localDateString,
+  removeExerciseFromDay,
+  reorderDayRoster,
   saveWorkoutState,
   sessionOnDate,
   sessionsForExercise,
@@ -97,16 +109,23 @@ export default function WorkoutTracker() {
   const [profileOpen, setProfileOpen] = useState(false)
   const [profileDraft, setProfileDraft] = useState(state.profileName)
   const [addOpen, setAddOpen] = useState(false)
-  const [addName, setAddName] = useState("")
-  const [addError, setAddError] = useState("")
 
   const [detailsExerciseId, setDetailsExerciseId] = useState<string | null>(null)
   const [deleteExerciseId, setDeleteExerciseId] = useState<string | null>(null)
+  const [removeTarget, setRemoveTarget] = useState<{
+    exerciseId: string
+    date: string
+  } | null>(null)
   const [reorderMode, setReorderMode] = useState(false)
 
+  const dayExercises = useMemo(
+    () => exercisesForDate(state, viewDate),
+    [state, viewDate]
+  )
+
   const exerciseIds = useMemo(
-    () => state.exercises.map((e) => e.id),
-    [state.exercises]
+    () => dayExercises.map((e) => e.id),
+    [dayExercises]
   )
 
   const reorderSensors = useSensors(
@@ -183,6 +202,10 @@ export default function WorkoutTracker() {
   }, [user, authLoading])
 
   useEffect(() => {
+    setState((s) => applyWorkoutDefaults(s, viewDate))
+  }, [viewDate])
+
+  useEffect(() => {
     setDrafts((prev) => {
       const next = { ...prev }
       for (const ex of state.exercises) {
@@ -203,35 +226,40 @@ export default function WorkoutTracker() {
     setProfileOpen(false)
   }, [profileDraft])
 
-  const tryAddExercise = useCallback(() => {
-    const trimmed = addName.trim()
-    if (!trimmed) {
-      setAddError("Enter a name.")
-      return
-    }
-    const taken = state.exercises.some(
-      (e) => e.name.toLowerCase() === trimmed.toLowerCase()
-    )
-    if (taken) {
-      setAddError("That exercise already exists.")
-      return
-    }
-    const id = crypto.randomUUID()
-    const ex: Exercise = {
-      id,
-      name: trimmed,
-      createdAt: new Date().toISOString(),
-    }
-    setState((s) => ({
-      ...s,
-      exercises: [...s.exercises, ex],
-      sessionsByExerciseId: { ...s.sessionsByExerciseId, [id]: [] },
-    }))
-    setDrafts((d) => ({ ...d, [id]: { reps: "", lbs: "" } }))
-    setAddName("")
-    setAddError("")
-    setAddOpen(false)
-  }, [addName, state.exercises])
+  const addExistingToDay = useCallback(
+    (exerciseId: string) => {
+      setState((s) => addExerciseToDay(s, exerciseId, viewDate))
+    },
+    [viewDate]
+  )
+
+  const createNewExercise = useCallback(
+    (name: string) => {
+      const id = crypto.randomUUID()
+      const ex: Exercise = {
+        id,
+        name: name.trim(),
+        createdAt: new Date().toISOString(),
+      }
+      setState((s) => {
+        let next: WorkoutAppState = {
+          ...s,
+          exercises: [...s.exercises, ex],
+          sessionsByExerciseId: { ...s.sessionsByExerciseId, [id]: [] },
+        }
+        next = addExerciseToDay(next, id, viewDate)
+        return next
+      })
+      setDrafts((d) => ({ ...d, [id]: { reps: "", lbs: "" } }))
+    },
+    [viewDate]
+  )
+
+  const removeFromDay = useCallback((exerciseId: string, dateStr: string) => {
+    setState((s) => removeExerciseFromDay(s, exerciseId, dateStr))
+    setRemoveTarget(null)
+    setDetailsExerciseId((cur) => (cur === exerciseId ? null : cur))
+  }, [])
 
   const commitDraftIfValid = useCallback(
     (exerciseId: string) => {
@@ -324,24 +352,16 @@ export default function WorkoutTracker() {
     }))
   }
 
-  const deleteExercise = useCallback(
-    (exerciseId: string) => {
-      setState((s) => {
-        const exercises = s.exercises.filter((e) => e.id !== exerciseId)
-        const sessionsByExerciseId = { ...s.sessionsByExerciseId }
-        delete sessionsByExerciseId[exerciseId]
-        return { ...s, exercises, sessionsByExerciseId }
-      })
-      setDrafts((d) => {
-        const next = { ...d }
-        delete next[exerciseId]
-        return next
-      })
-      setDetailsExerciseId((cur) => (cur === exerciseId ? null : cur))
-      setDeleteExerciseId(null)
-    },
-    []
-  )
+  const deleteExercise = useCallback((exerciseId: string) => {
+    setState((s) => deleteExerciseFromLibrary(s, exerciseId))
+    setDrafts((d) => {
+      const next = { ...d }
+      delete next[exerciseId]
+      return next
+    })
+    setDetailsExerciseId((cur) => (cur === exerciseId ? null : cur))
+    setDeleteExerciseId(null)
+  }, [])
 
   const updateExerciseYoutubeUrl = useCallback((exerciseId: string, url: string) => {
     const trimmed = url.trim()
@@ -358,19 +378,16 @@ export default function WorkoutTracker() {
     setCalendarOpen(false)
   }, [])
 
-  const handleDragEnd = useCallback((event: DragEndEvent) => {
-    const { active, over } = event
-    if (!over || active.id === over.id) return
-    setState((s) => {
-      const oldIndex = s.exercises.findIndex((e) => e.id === active.id)
-      const newIndex = s.exercises.findIndex((e) => e.id === over.id)
-      if (oldIndex === -1 || newIndex === -1) return s
-      return {
-        ...s,
-        exercises: arrayMove(s.exercises, oldIndex, newIndex),
-      }
-    })
-  }, [])
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event
+      if (!over || active.id === over.id) return
+      setState((s) =>
+        reorderDayRoster(s, viewDate, String(active.id), String(over.id))
+      )
+    },
+    [viewDate]
+  )
 
   /** Only future dates are disabled; any past/today day is selectable even with no logs. */
   const calendarDisabled = (date: Date) => localDateString(date) > calendarToday
@@ -476,7 +493,7 @@ export default function WorkoutTracker() {
           </div>
 
           <div className="flex min-w-0 justify-end">
-            {state.exercises.length > 0 ? (
+            {dayExercises.length > 0 ? (
               <Button
                 type="button"
                 variant={reorderMode ? "secondary" : "ghost"}
@@ -492,9 +509,11 @@ export default function WorkoutTracker() {
       </header>
 
       <main className="mx-auto flex w-full max-w-lg flex-1 flex-col px-2 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2">
-        {state.exercises.length === 0 ? (
+        {dayExercises.length === 0 ? (
           <p className="py-10 text-center text-sm text-muted-foreground">
-            No exercises yet. Add one below to start logging sets.
+            {state.exercises.length === 0
+              ? "No workouts in your library yet. Create one below."
+              : "No workouts on this day. Add one from your library or create new."}
           </p>
         ) : reorderMode ? (
           <DndContext
@@ -507,9 +526,10 @@ export default function WorkoutTracker() {
               strategy={verticalListSortingStrategy}
             >
               <div className="flex flex-col">
-                {state.exercises.map((ex) => (
+                {dayExercises.map((ex, rowIndex) => (
                   <SortableExerciseRow
                     key={ex.id}
+                    tabIndexBase={rowIndex * 1000}
                     exercise={ex}
                     state={state}
                     viewDate={viewDate}
@@ -527,9 +547,10 @@ export default function WorkoutTracker() {
           </DndContext>
         ) : (
           <div className="flex flex-col">
-            {state.exercises.map((ex) => (
+            {dayExercises.map((ex, rowIndex) => (
               <ExerciseRow
                 key={ex.id}
+                tabIndexBase={rowIndex * 1000}
                 exercise={ex}
                 state={state}
                 viewDate={viewDate}
@@ -552,11 +573,7 @@ export default function WorkoutTracker() {
           type="button"
           variant="outline"
           className="h-12 w-full touch-manipulation gap-2 border-dashed"
-          onClick={() => {
-            setAddName("")
-            setAddError("")
-            setAddOpen(true)
-          }}
+          onClick={() => setAddOpen(true)}
         >
           <Plus className="size-4" aria-hidden />
           Add workout
@@ -582,6 +599,12 @@ export default function WorkoutTracker() {
               className="text-base"
             />
           </div>
+          <WorkoutDefaultsSettings
+            state={state}
+            onChange={(workoutDefaults) =>
+              setState((s) => ({ ...s, workoutDefaults }))
+            }
+          />
           <DialogFooter className="flex-col gap-2 sm:flex-col">
             <Button type="button" onClick={saveProfile}>
               Save
@@ -601,39 +624,44 @@ export default function WorkoutTracker() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+      <AddWorkoutDialog
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        state={state}
+        viewDate={viewDate}
+        onAddExisting={addExistingToDay}
+        onCreateNew={createNewExercise}
+      />
+
+      <Dialog
+        open={removeTarget !== null}
+        onOpenChange={(o) => !o && setRemoveTarget(null)}
+      >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Add exercise</DialogTitle>
+            <DialogTitle>Remove from this day?</DialogTitle>
             <DialogDescription>
-              Each name is saved once. Logs attach to that exercise over time.
+              Removes this workout from {removeTarget?.date}&apos;s log only. Past
+              and future logs elsewhere are kept.
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-2 py-2">
-            <Label htmlFor="exercise-name">Name</Label>
-            <Input
-              id="exercise-name"
-              value={addName}
-              onChange={(e) => {
-                setAddName(e.target.value)
-                setAddError("")
-              }}
-              placeholder="e.g. Squats"
-              autoComplete="off"
-              className="text-base"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") tryAddExercise()
-              }}
-            />
-            {addError ? (
-              <p className="text-sm text-destructive" role="alert">
-                {addError}
-              </p>
-            ) : null}
-          </div>
           <DialogFooter>
-            <Button type="button" onClick={tryAddExercise}>
-              Save exercise
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setRemoveTarget(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() =>
+                removeTarget &&
+                removeFromDay(removeTarget.exerciseId, removeTarget.date)
+              }
+            >
+              Remove
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -644,7 +672,8 @@ export default function WorkoutTracker() {
           <DialogHeader>
             <DialogTitle>Delete workout?</DialogTitle>
             <DialogDescription>
-              This removes the exercise and all of its saved logs on this device.
+              Deletes this workout and all saved logs everywhere. This cannot be
+              undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -667,7 +696,13 @@ export default function WorkoutTracker() {
         onOpenChange={(o) => !o && setDetailsExerciseId(null)}
         exercise={state.exercises.find((e) => e.id === detailsExerciseId) ?? null}
         state={state}
+        viewDate={viewDate}
         onUpdateYoutubeUrl={updateExerciseYoutubeUrl}
+        onRequestRemove={() => {
+          if (!detailsExerciseId) return
+          setRemoveTarget({ exerciseId: detailsExerciseId, date: viewDate })
+          setDetailsExerciseId(null)
+        }}
         onRequestDelete={() => {
           if (!detailsExerciseId) return
           setDeleteExerciseId(detailsExerciseId)
@@ -685,6 +720,7 @@ type ExerciseRowProps = {
   state: WorkoutAppState
   viewDate: string
   isViewingToday: boolean
+  tabIndexBase: number
   draft: Draft
   onDraftChange: (field: keyof Draft, value: string) => void
   onCommitDraft: () => void
@@ -732,6 +768,7 @@ function ExerciseRow({
   state,
   viewDate,
   isViewingToday,
+  tabIndexBase,
   draft,
   onDraftChange,
   onCommitDraft,
@@ -743,6 +780,35 @@ function ExerciseRow({
   const prior = lastSessionBeforeDate(state, exercise.id, viewDate)
   const session = sessionOnDate(state, exercise.id, viewDate)
   const sets = session?.sets ?? []
+  const [autoEditSetIndex, setAutoEditSetIndex] = useState<number | null>(null)
+
+  const advanceFromSet = useCallback(
+    (setIndex: number | "draft") => {
+      if (setIndex === "draft") {
+        onCommitDraft()
+        requestAnimationFrame(() =>
+          focusSetInput(exercise.id, "draft", "reps")
+        )
+        return
+      }
+      const next = setIndex + 1
+      if (next < sets.length) {
+        setAutoEditSetIndex(next)
+        requestAnimationFrame(() =>
+          focusSetInput(exercise.id, next, "reps")
+        )
+      } else {
+        focusSetInput(exercise.id, "draft", "reps")
+      }
+    },
+    [exercise.id, onCommitDraft, sets.length]
+  )
+
+  const tabFor = (setIndex: number | "draft", field: "reps" | "lbs") => {
+    const base =
+      setIndex === "draft" ? tabIndexBase + sets.length * 2 : tabIndexBase + setIndex * 2
+    return base + (field === "reps" ? 1 : 2)
+  }
 
   return (
     <article
@@ -807,7 +873,12 @@ function ExerciseRow({
                 exerciseId={exercise.id}
                 set={set}
                 setIndex={setIndex}
+                tabIndexReps={tabFor(setIndex, "reps")}
+                tabIndexLbs={tabFor(setIndex, "lbs")}
+                autoEdit={autoEditSetIndex === setIndex}
+                onAutoEditStart={() => setAutoEditSetIndex(null)}
                 onSave={(reps, weightLb) => onUpdateSet(setIndex, reps, weightLb)}
+                onAdvanceFromLbs={() => advanceFromSet(setIndex)}
               />
             </div>
           ))}
@@ -819,8 +890,11 @@ function ExerciseRow({
               <DraftSetPair
                 exerciseId={exercise.id}
                 draft={draft}
+                tabIndexReps={tabFor("draft", "reps")}
+                tabIndexLbs={tabFor("draft", "lbs")}
                 onDraftChange={onDraftChange}
                 onCommitDraft={onCommitDraft}
+                onAdvanceFromLbs={() => advanceFromSet("draft")}
               />
             </div>
           )}
@@ -846,13 +920,19 @@ function LastSummaryTwoLine({ session }: { session: { sets: LoggedSet[] } }) {
 function DraftSetPair({
   exerciseId,
   draft,
+  tabIndexReps,
+  tabIndexLbs,
   onDraftChange,
   onCommitDraft,
+  onAdvanceFromLbs,
 }: {
   exerciseId: string
   draft: Draft
+  tabIndexReps: number
+  tabIndexLbs: number
   onDraftChange: (field: keyof Draft, value: string) => void
   onCommitDraft: () => void
+  onAdvanceFromLbs: () => void
 }) {
   const wrapRef = useRef<HTMLDivElement>(null)
 
@@ -870,21 +950,31 @@ function DraftSetPair({
       data-interactive="true"
     >
       <Input
-        id={`draft-reps-${exerciseId}`}
+        id={setInputId(exerciseId, "draft", "reps")}
         inputMode="numeric"
+        enterKeyHint="next"
         placeholder="Rep"
         aria-label="Reps"
+        tabIndex={tabIndexReps}
         value={draft.reps}
         onChange={(e) => onDraftChange("reps", e.target.value)}
+        onKeyDown={(e) =>
+          handleSetFieldKeyDown(e, exerciseId, "draft", "reps")
+        }
         className="h-9 w-[2.75rem] min-w-0 flex-1 px-1 text-center text-sm tabular-nums"
       />
       <Input
-        id={`draft-lbs-${exerciseId}`}
+        id={setInputId(exerciseId, "draft", "lbs")}
         inputMode="decimal"
+        enterKeyHint="next"
         placeholder="lbs"
         aria-label="Weight in lb"
+        tabIndex={tabIndexLbs}
         value={draft.lbs}
         onChange={(e) => onDraftChange("lbs", e.target.value)}
+        onKeyDown={(e) =>
+          handleSetFieldKeyDown(e, exerciseId, "draft", "lbs", onAdvanceFromLbs)
+        }
         className="h-9 w-[2.75rem] min-w-0 flex-1 px-1 text-center text-sm tabular-nums"
       />
     </div>
@@ -895,17 +985,34 @@ function LoggedSetCell({
   exerciseId,
   set,
   setIndex,
+  tabIndexReps,
+  tabIndexLbs,
+  autoEdit,
+  onAutoEditStart,
   onSave,
+  onAdvanceFromLbs,
 }: {
   exerciseId: string
   set: LoggedSet
   setIndex: number
+  tabIndexReps: number
+  tabIndexLbs: number
+  autoEdit?: boolean
+  onAutoEditStart?: () => void
   onSave: (reps: number, weightLb: number) => void
+  onAdvanceFromLbs: () => void
 }) {
   const [editing, setEditing] = useState(false)
   const [repsStr, setRepsStr] = useState(String(set.reps))
   const [lbsStr, setLbsStr] = useState(String(set.weightLb))
   const wrapRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (autoEdit) {
+      setEditing(true)
+      onAutoEditStart?.()
+    }
+  }, [autoEdit, onAutoEditStart])
 
   useEffect(() => {
     setRepsStr(String(set.reps))
@@ -930,8 +1037,6 @@ function LoggedSetCell({
     flush()
   }
 
-  const idBase = `${exerciseId}-${set.loggedAt}-${setIndex}`
-
   if (!editing) {
     return (
       <button
@@ -953,22 +1058,35 @@ function LoggedSetCell({
       data-interactive="true"
     >
       <Input
-        id={`${idBase}-reps`}
+        id={setInputId(exerciseId, setIndex, "reps")}
         autoFocus
         inputMode="numeric"
+        enterKeyHint="next"
         placeholder="Rep"
         aria-label={`Set ${setIndex + 1} reps`}
+        tabIndex={tabIndexReps}
         value={repsStr}
         onChange={(e) => setRepsStr(e.target.value)}
+        onKeyDown={(e) =>
+          handleSetFieldKeyDown(e, exerciseId, setIndex, "reps")
+        }
         className="h-9 w-[2.75rem] min-w-0 flex-1 px-1 text-center text-sm tabular-nums"
       />
       <Input
-        id={`${idBase}-lbs`}
+        id={setInputId(exerciseId, setIndex, "lbs")}
         inputMode="decimal"
+        enterKeyHint="next"
         placeholder="lbs"
         aria-label={`Set ${setIndex + 1} weight`}
+        tabIndex={tabIndexLbs}
         value={lbsStr}
         onChange={(e) => setLbsStr(e.target.value)}
+        onKeyDown={(e) =>
+          handleSetFieldKeyDown(e, exerciseId, setIndex, "lbs", () => {
+            flush()
+            onAdvanceFromLbs()
+          })
+        }
         className="h-9 w-[2.75rem] min-w-0 flex-1 px-1 text-center text-sm tabular-nums"
       />
     </div>
@@ -980,14 +1098,18 @@ function ExerciseDetailsSheet({
   onOpenChange,
   exercise,
   state,
+  viewDate,
   onUpdateYoutubeUrl,
+  onRequestRemove,
   onRequestDelete,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   exercise: Exercise | null
   state: WorkoutAppState
+  viewDate: string
   onUpdateYoutubeUrl: (exerciseId: string, url: string) => void
+  onRequestRemove: () => void
   onRequestDelete: () => void
 }) {
   const [draftUrl, setDraftUrl] = useState("")
@@ -1129,15 +1251,25 @@ function ExerciseDetailsSheet({
             </Table>
           </div>
 
-          <Button
-            type="button"
-            variant="destructive"
-            className="w-full touch-manipulation gap-2"
-            onClick={onRequestDelete}
-          >
-            <Trash2 className="size-4" aria-hidden />
-            Delete exercise
-          </Button>
+          <div className="grid gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full touch-manipulation"
+              onClick={onRequestRemove}
+            >
+              Remove from {formatLogViewTitle(viewDate)}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              className="w-full touch-manipulation gap-2"
+              onClick={onRequestDelete}
+            >
+              <Trash2 className="size-4" aria-hidden />
+              Delete workout (all data)
+            </Button>
+          </div>
         </div>
       </SheetContent>
     </Sheet>

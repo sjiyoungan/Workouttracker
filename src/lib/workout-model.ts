@@ -18,10 +18,24 @@ export type Exercise = {
   youtubeUrl?: string
 }
 
+export type WorkoutSchedule =
+  | { type: "every_day" }
+  | { type: "weekdays"; days: number[] }
+  | { type: "interval"; everyDays: number; startDate: string }
+
+export type WorkoutDefault = {
+  id: string
+  exerciseId: string
+  schedule: WorkoutSchedule
+}
+
 export type WorkoutAppState = {
   profileName: string
   exercises: Exercise[]
   sessionsByExerciseId: Record<string, DaySession[]>
+  /** Exercise ids shown on a given day (YYYY-MM-DD). */
+  rosterByDate?: Record<string, string[]>
+  workoutDefaults?: WorkoutDefault[]
 }
 
 export function defaultWorkoutState(): WorkoutAppState {
@@ -29,6 +43,8 @@ export function defaultWorkoutState(): WorkoutAppState {
     profileName: "You",
     exercises: [],
     sessionsByExerciseId: {},
+    rosterByDate: {},
+    workoutDefaults: [],
   }
 }
 
@@ -113,6 +129,131 @@ export function summarizeSession(session: DaySession): string {
   return `${n} set${n === 1 ? "" : "s"} ${last.reps} reps ${last.weightLb} lbs`
 }
 
+export function materializeRoster(
+  state: WorkoutAppState,
+  dateStr: string
+): string[] {
+  const roster = state.rosterByDate?.[dateStr]
+  if (roster && roster.length > 0) {
+    const valid = new Set(state.exercises.map((e) => e.id))
+    return roster.filter((id) => valid.has(id))
+  }
+  const onDay = new Set<string>()
+  for (const ex of state.exercises) {
+    const session = sessionOnDate(state, ex.id, dateStr)
+    if (session && session.sets.length > 0) onDay.add(ex.id)
+  }
+  if (onDay.size > 0) {
+    return state.exercises.filter((e) => onDay.has(e.id)).map((e) => e.id)
+  }
+  return state.exercises.map((e) => e.id)
+}
+
+export function getRosterIds(
+  state: WorkoutAppState,
+  dateStr: string
+): string[] {
+  return materializeRoster(state, dateStr)
+}
+
+export function exercisesForDate(
+  state: WorkoutAppState,
+  dateStr: string
+): Exercise[] {
+  const ids = getRosterIds(state, dateStr)
+  const byId = new Map(state.exercises.map((e) => [e.id, e]))
+  return ids.map((id) => byId.get(id)).filter((e): e is Exercise => Boolean(e))
+}
+
+export function clearSessionOnDate(
+  state: WorkoutAppState,
+  exerciseId: string,
+  dateStr: string
+): WorkoutAppState {
+  const list = (state.sessionsByExerciseId[exerciseId] ?? []).filter(
+    (s) => s.date !== dateStr
+  )
+  return {
+    ...state,
+    sessionsByExerciseId: {
+      ...state.sessionsByExerciseId,
+      [exerciseId]: list,
+    },
+  }
+}
+
+export function removeExerciseFromDay(
+  state: WorkoutAppState,
+  exerciseId: string,
+  dateStr: string
+): WorkoutAppState {
+  const roster = materializeRoster(state, dateStr).filter((id) => id !== exerciseId)
+  let next = clearSessionOnDate(state, exerciseId, dateStr)
+  next = {
+    ...next,
+    rosterByDate: { ...next.rosterByDate, [dateStr]: roster },
+  }
+  return next
+}
+
+export function addExerciseToDay(
+  state: WorkoutAppState,
+  exerciseId: string,
+  dateStr: string
+): WorkoutAppState {
+  const roster = materializeRoster(state, dateStr)
+  if (roster.includes(exerciseId)) return state
+  return {
+    ...state,
+    rosterByDate: {
+      ...state.rosterByDate,
+      [dateStr]: [...roster, exerciseId],
+    },
+  }
+}
+
+export function reorderDayRoster(
+  state: WorkoutAppState,
+  dateStr: string,
+  activeId: string,
+  overId: string
+): WorkoutAppState {
+  const roster = materializeRoster(state, dateStr)
+  const oldIndex = roster.indexOf(activeId)
+  const newIndex = roster.indexOf(overId)
+  if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex) return state
+  const next = [...roster]
+  const [moved] = next.splice(oldIndex, 1)
+  next.splice(newIndex, 0, moved)
+  return {
+    ...state,
+    rosterByDate: { ...state.rosterByDate, [dateStr]: next },
+  }
+}
+
+export function deleteExerciseFromLibrary(
+  state: WorkoutAppState,
+  exerciseId: string
+): WorkoutAppState {
+  const exercises = state.exercises.filter((e) => e.id !== exerciseId)
+  const sessionsByExerciseId = { ...state.sessionsByExerciseId }
+  delete sessionsByExerciseId[exerciseId]
+  const rosterByDate: Record<string, string[]> = {}
+  for (const [date, ids] of Object.entries(state.rosterByDate ?? {})) {
+    rosterByDate[date] = ids.filter((id) => id !== exerciseId)
+  }
+  const workoutDefaults = (state.workoutDefaults ?? []).filter(
+    (d) => d.exerciseId !== exerciseId
+  )
+  return {
+    ...state,
+    exercises,
+    sessionsByExerciseId,
+    rosterByDate,
+    workoutDefaults,
+  }
+}
+
 export function loadWorkoutState(): WorkoutAppState {
   try {
     const raw = localStorage.getItem(WORKOUT_STORAGE_KEY)
@@ -127,6 +268,13 @@ export function loadWorkoutState(): WorkoutAppState {
         typeof parsed.sessionsByExerciseId === "object"
           ? parsed.sessionsByExerciseId
           : {},
+      rosterByDate:
+        parsed.rosterByDate && typeof parsed.rosterByDate === "object"
+          ? parsed.rosterByDate
+          : {},
+      workoutDefaults: Array.isArray(parsed.workoutDefaults)
+        ? parsed.workoutDefaults
+        : [],
     }
   } catch {
     return defaultWorkoutState()

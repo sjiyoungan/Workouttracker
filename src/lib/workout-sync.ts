@@ -15,6 +15,13 @@ function normalizeWorkoutData(raw: unknown): WorkoutAppState {
       typeof parsed.sessionsByExerciseId === "object"
         ? parsed.sessionsByExerciseId
         : {},
+    rosterByDate:
+      parsed.rosterByDate && typeof parsed.rosterByDate === "object"
+        ? parsed.rosterByDate
+        : {},
+    workoutDefaults: Array.isArray(parsed.workoutDefaults)
+      ? parsed.workoutDefaults
+      : [],
   }
 }
 
