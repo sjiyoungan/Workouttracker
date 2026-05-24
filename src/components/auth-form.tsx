@@ -1,12 +1,18 @@
 import { useState } from "react"
+import { useNavigate } from "react-router-dom"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useAuth } from "@/contexts/auth-context"
 
-export default function AuthForm() {
+type AuthFormProps = {
+  redirectTo?: string
+}
+
+export default function AuthForm({ redirectTo = "/" }: AuthFormProps) {
   const { signIn, signUp } = useAuth()
+  const navigate = useNavigate()
   const [mode, setMode] = useState<"sign-in" | "sign-up">("sign-in")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -27,11 +33,19 @@ export default function AuthForm() {
     }
     if (mode === "sign-up") {
       setMessage("Check your email to confirm your account, then sign in.")
+      return
     }
+    navigate(redirectTo, { replace: true })
   }
 
   return (
-    <div className="grid gap-3 py-2">
+    <form
+      className="grid gap-3"
+      onSubmit={(e) => {
+        e.preventDefault()
+        void submit()
+      }}
+    >
       <div className="grid gap-2">
         <Label htmlFor="auth-email">Email</Label>
         <Input
@@ -41,6 +55,7 @@ export default function AuthForm() {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           className="text-base"
+          required
         />
       </div>
       <div className="grid gap-2">
@@ -52,6 +67,8 @@ export default function AuthForm() {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           className="text-base"
+          required
+          minLength={6}
         />
       </div>
       {error ? (
@@ -64,7 +81,7 @@ export default function AuthForm() {
           {message}
         </p>
       ) : null}
-      <Button type="button" disabled={busy} onClick={submit}>
+      <Button type="submit" disabled={busy}>
         {mode === "sign-in" ? "Sign in" : "Create account"}
       </Button>
       <Button
@@ -81,6 +98,6 @@ export default function AuthForm() {
           ? "Need an account? Sign up"
           : "Already have an account? Sign in"}
       </Button>
-    </div>
+    </form>
   )
 }

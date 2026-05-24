@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useNavigate } from "react-router-dom"
 import {
   DndContext,
   type DragEndEvent,
@@ -62,7 +63,6 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
-import AuthForm from "@/components/auth-form"
 import { useAuth } from "@/contexts/auth-context"
 import type { Exercise, LoggedSet, WorkoutAppState } from "@/lib/workout-model"
 import {
@@ -82,7 +82,8 @@ type Draft = { reps: string; lbs: string }
 
 export default function WorkoutTracker() {
   const calendarToday = localDateString()
-  const { user, loading: authLoading, configured, signOut } = useAuth()
+  const { user, loading: authLoading, signOut } = useAuth()
+  const navigate = useNavigate()
   const [state, setState] = useState<WorkoutAppState>(loadWorkoutState)
   const [drafts, setDrafts] = useState<Record<string, Draft>>({})
   const draftsRef = useRef(drafts)
@@ -567,49 +568,36 @@ export default function WorkoutTracker() {
           <DialogHeader>
             <DialogTitle>Account</DialogTitle>
             <DialogDescription>
-              {user
-                ? "Your display name and account settings."
-                : configured
-                  ? "Sign in to sync workouts across devices."
-                  : "This name appears in the top bar on this device."}
+              Your display name and account settings.
             </DialogDescription>
           </DialogHeader>
-          {configured && !user ? (
-            <AuthForm />
-          ) : (
-            <>
-              {user ? (
-                <p className="text-sm text-muted-foreground">{user.email}</p>
-              ) : null}
-              <div className="grid gap-2 py-2">
-                <Label htmlFor="profile-name">Display name</Label>
-                <Input
-                  id="profile-name"
-                  value={profileDraft}
-                  onChange={(e) => setProfileDraft(e.target.value)}
-                  autoComplete="nickname"
-                  className="text-base"
-                />
-              </div>
-              <DialogFooter className={user ? "flex-col gap-2 sm:flex-col" : undefined}>
-                <Button type="button" onClick={saveProfile}>
-                  Save
-                </Button>
-                {user ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => {
-                      void signOut()
-                      setProfileOpen(false)
-                    }}
-                  >
-                    Sign out
-                  </Button>
-                ) : null}
-              </DialogFooter>
-            </>
-          )}
+          <p className="text-sm text-muted-foreground">{user?.email}</p>
+          <div className="grid gap-2 py-2">
+            <Label htmlFor="profile-name">Display name</Label>
+            <Input
+              id="profile-name"
+              value={profileDraft}
+              onChange={(e) => setProfileDraft(e.target.value)}
+              autoComplete="nickname"
+              className="text-base"
+            />
+          </div>
+          <DialogFooter className="flex-col gap-2 sm:flex-col">
+            <Button type="button" onClick={saveProfile}>
+              Save
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                void signOut()
+                setProfileOpen(false)
+                navigate("/sign-in")
+              }}
+            >
+              Sign out
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
