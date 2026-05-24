@@ -62,6 +62,8 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
+import AuthForm from "@/components/auth-form"
+import { useAuth } from "@/contexts/auth-context"
 import type { Exercise, LoggedSet, WorkoutAppState } from "@/lib/workout-model"
 import {
   allDatesWithLogs,
@@ -74,15 +76,19 @@ import {
   sessionOnDate,
   sessionsForExercise,
 } from "@/lib/workout-model"
+import { fetchWorkoutState, upsertWorkoutState } from "@/lib/workout-sync"
 
 type Draft = { reps: string; lbs: string }
 
 export default function WorkoutTracker() {
   const calendarToday = localDateString()
+  const { user, loading: authLoading, configured, signOut } = useAuth()
   const [state, setState] = useState<WorkoutAppState>(loadWorkoutState)
   const [drafts, setDrafts] = useState<Record<string, Draft>>({})
   const draftsRef = useRef(drafts)
   draftsRef.current = drafts
+  const cloudReadyUserIdRef = useRef<string | null>(null)
+  const saveCloudTimerRef = useRef<number | null>(null)
 
   const [viewDate, setViewDate] = useState(() => localDateString())
   const [calendarOpen, setCalendarOpen] = useState(false)
@@ -128,7 +134,52 @@ export default function WorkoutTracker() {
 
   useEffect(() => {
     saveWorkoutState(state)
-  }, [state])
+    const uid = user?.id
+    if (!uid || cloudReadyUserIdRef.current !== uid) return
+    if (saveCloudTimerRef.current) window.clearTimeout(saveCloudTimerRef.current)
+    saveCloudTimerRef.current = window.setTimeout(() => {
+      upsertWorkoutState(uid, state).catch((err) => {
+        console.error("Failed to sync workout data:", err)
+      })
+    }, 800)
+    return () => {
+      if (saveCloudTimerRef.current) window.clearTimeout(saveCloudTimerRef.current)
+    }
+  }, [state, user?.id])
+
+  useEffect(() => {
+    if (authLoading || !user) {
+      cloudReadyUserIdRef.current = null
+      return
+    }
+
+    let cancelled = false
+    cloudReadyUserIdRef.current = null
+
+    ;(async () => {
+      const local = loadWorkoutState()
+      try {
+        const cloud = await fetchWorkoutState(user.id)
+        if (cancelled) return
+        if (cloud && cloud.exercises.length > 0) {
+          setState(cloud)
+        } else if (local.exercises.length > 0) {
+          await upsertWorkoutState(user.id, local)
+          if (!cancelled) setState(local)
+        } else if (cloud) {
+          setState(cloud)
+        }
+      } catch (err) {
+        console.error("Failed to load cloud workout data:", err)
+      } finally {
+        if (!cancelled) cloudReadyUserIdRef.current = user.id
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [user, authLoading])
 
   useEffect(() => {
     setDrafts((prev) => {
@@ -514,26 +565,51 @@ export default function WorkoutTracker() {
       <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Profile</DialogTitle>
+            <DialogTitle>Account</DialogTitle>
             <DialogDescription>
-              This name appears in the top bar on this device.
+              {user
+                ? "Your display name and account settings."
+                : configured
+                  ? "Sign in to sync workouts across devices."
+                  : "This name appears in the top bar on this device."}
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-2 py-2">
-            <Label htmlFor="profile-name">Display name</Label>
-            <Input
-              id="profile-name"
-              value={profileDraft}
-              onChange={(e) => setProfileDraft(e.target.value)}
-              autoComplete="nickname"
-              className="text-base"
-            />
-          </div>
-          <DialogFooter>
-            <Button type="button" onClick={saveProfile}>
-              Save
-            </Button>
-          </DialogFooter>
+          {configured && !user ? (
+            <AuthForm />
+          ) : (
+            <>
+              {user ? (
+                <p className="text-sm text-muted-foreground">{user.email}</p>
+              ) : null}
+              <div className="grid gap-2 py-2">
+                <Label htmlFor="profile-name">Display name</Label>
+                <Input
+                  id="profile-name"
+                  value={profileDraft}
+                  onChange={(e) => setProfileDraft(e.target.value)}
+                  autoComplete="nickname"
+                  className="text-base"
+                />
+              </div>
+              <DialogFooter className={user ? "flex-col gap-2 sm:flex-col" : undefined}>
+                <Button type="button" onClick={saveProfile}>
+                  Save
+                </Button>
+                {user ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      void signOut()
+                      setProfileOpen(false)
+                    }}
+                  >
+                    Sign out
+                  </Button>
+                ) : null}
+              </DialogFooter>
+            </>
+          )}
         </DialogContent>
       </Dialog>
 

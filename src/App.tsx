@@ -1,5 +1,10 @@
+import { AuthProvider } from "@/contexts/auth-context"
 import WorkoutTracker from "@/components/workout-tracker"
 
 export default function App() {
-  return <WorkoutTracker />
+  return (
+    <AuthProvider>
+      <WorkoutTracker />
+    </AuthProvider>
+  )
 }
