@@ -33,19 +33,17 @@ export default function SignInPage() {
           <Dumbbell className="size-6" aria-hidden />
         </div>
         <h1 className="text-2xl font-semibold tracking-tight">Workout Tracker</h1>
-        <p className="max-w-xs text-sm text-muted-foreground">
-          Sign in to sync your workouts across devices.
-        </p>
       </div>
 
       <Card className="w-full max-w-sm">
-        <CardHeader className="pb-4">
+        <CardHeader className="pb-4 text-center">
           <CardTitle className="text-lg">Welcome back</CardTitle>
-          <CardDescription>
-            {configured
-              ? "Use your email and password to continue."
-              : "Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to your environment."}
-          </CardDescription>
+          {!configured ? (
+            <CardDescription>
+              Supabase is not configured. Add VITE_SUPABASE_URL and
+              VITE_SUPABASE_ANON_KEY to your environment.
+            </CardDescription>
+          ) : null}
         </CardHeader>
         <CardContent>
           {configured ? (

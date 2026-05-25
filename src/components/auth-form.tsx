@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { useAuth } from "@/contexts/auth-context"
 
 type AuthFormProps = {
@@ -46,31 +45,29 @@ export default function AuthForm({ redirectTo = "/" }: AuthFormProps) {
         void submit()
       }}
     >
-      <div className="grid gap-2">
-        <Label htmlFor="auth-email">Email</Label>
-        <Input
-          id="auth-email"
-          type="email"
-          autoComplete="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          className="text-base"
-          required
-        />
-      </div>
-      <div className="grid gap-2">
-        <Label htmlFor="auth-password">Password</Label>
-        <Input
-          id="auth-password"
-          type="password"
-          autoComplete={mode === "sign-in" ? "current-password" : "new-password"}
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className="text-base"
-          required
-          minLength={6}
-        />
-      </div>
+      <Input
+        id="auth-email"
+        type="email"
+        autoComplete="email"
+        placeholder="Email"
+        aria-label="Email"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        className="h-11 text-base"
+        required
+      />
+      <Input
+        id="auth-password"
+        type="password"
+        autoComplete={mode === "sign-in" ? "current-password" : "new-password"}
+        placeholder="Password"
+        aria-label="Password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        className="h-11 text-base"
+        required
+        minLength={6}
+      />
       {error ? (
         <p className="text-sm text-destructive" role="alert">
           {error}
@@ -81,7 +78,7 @@ export default function AuthForm({ redirectTo = "/" }: AuthFormProps) {
           {message}
         </p>
       ) : null}
-      <Button type="submit" disabled={busy}>
+      <Button type="submit" disabled={busy} className="h-11 w-full text-base">
         {mode === "sign-in" ? "Sign in" : "Create account"}
       </Button>
       <Button
