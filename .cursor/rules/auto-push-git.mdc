@@ -1,0 +1,17 @@
+---
+description: Commit and push all project changes to GitHub when work is complete
+alwaysApply: true
+---
+
+# Auto push to Git
+
+When you finish implementing or fixing something in this repo:
+
+1. **Commit and push** without waiting for the user to ask, unless they explicitly say not to commit/push.
+2. Run `git status` and `git diff` first. Skip if there is nothing to commit.
+3. **Never commit** secrets (`.env`, `.env.local`, credentials, service role keys).
+4. Use clear commit messages (1–2 sentences, focus on why).
+5. Push to the current branch on `origin` (usually `main`): `git push origin HEAD`.
+6. Do not force-push to `main` unless the user explicitly requests it.
+
+If commit fails due to a hook, fix the issue and create a **new** commit (do not amend unless hook rules allow it).
